@@ -19,6 +19,14 @@ body {
 	background: var(--vscode-editor-background);
 }
 
+html {
+	padding: 0;
+}
+
+body {
+	padding: 4px;
+}
+
 button {
 	font: inherit;
 }
@@ -66,8 +74,8 @@ button {
 }
 
 .icon-button.selected {
-	color: var(--vscode-button-foreground);
-	background: var(--vscode-button-background);
+	color: var(--vscode-icon-foreground);
+	background: var(--vscode-toolbar-activeBackground, var(--vscode-toolbar-hoverBackground));
 }
 
 .icon-button:focus-visible,
@@ -133,7 +141,7 @@ main {
 .column-header,
 .file-list.list-view .file-entry {
 	display: grid;
-	grid-template-columns: minmax(180px, 1fr) minmax(150px, 210px) 90px;
+	grid-template-columns: minmax(180px, 1fr) minmax(150px, 210px) minmax(150px, 210px) 90px;
 	align-items: center;
 }
 
@@ -147,6 +155,15 @@ main {
 	color: var(--vscode-descriptionForeground);
 	background: var(--vscode-editor-background);
 	font-size: 12px;
+}
+
+.column-header span:last-child {
+	text-align: right;
+}
+
+.column-header span:nth-child(2),
+.column-header span:nth-child(3) {
+	text-align: center;
 }
 
 .file-list.list-view {
@@ -171,6 +188,11 @@ main {
 }
 
 .file-entry.selected {
+	background: var(--vscode-list-inactiveSelectionBackground);
+	color: var(--vscode-list-inactiveSelectionForeground, var(--vscode-foreground));
+}
+
+.file-list:focus-within .file-entry.selected {
 	background: var(--vscode-list-activeSelectionBackground);
 	color: var(--vscode-list-activeSelectionForeground);
 }
@@ -197,6 +219,7 @@ main {
 }
 
 .entry-name span,
+.entry-created,
 .entry-modified,
 .entry-size {
 	overflow: hidden;
@@ -204,6 +227,7 @@ main {
 	white-space: nowrap;
 }
 
+.entry-created,
 .entry-modified,
 .entry-size {
 	padding-left: 12px;
@@ -211,6 +235,41 @@ main {
 	font-size: 12px;
 }
 
+.entry-size {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 5px;
+}
+
+.calculate-size-button {
+	display: inline-grid;
+	flex: 0 0 auto;
+	width: 20px;
+	height: 20px;
+	padding: 0;
+	place-items: center;
+	border: 0;
+	border-radius: 3px;
+	color: inherit;
+	background: transparent;
+	cursor: pointer;
+}
+
+.calculate-size-button:hover:not(:disabled) {
+	background: var(--vscode-toolbar-hoverBackground);
+}
+
+.calculate-size-button:focus-visible {
+	outline: 1px solid var(--vscode-focusBorder);
+	outline-offset: -1px;
+}
+
+.calculate-size-button:disabled {
+	cursor: default;
+}
+
+.selected .entry-created,
 .selected .entry-modified,
 .selected .entry-size {
 	color: inherit;
@@ -220,7 +279,7 @@ main {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, minmax(104px, 1fr));
 	gap: 8px;
-	padding: 14px;
+	padding: 14px 0;
 }
 
 .file-list.grid-view .file-entry {
@@ -256,8 +315,10 @@ main {
 	word-break: break-word;
 	-webkit-box-orient: vertical;
 	-webkit-line-clamp: 2;
+	line-clamp: 2;
 }
 
+.file-list.grid-view .entry-created,
 .file-list.grid-view .entry-modified,
 .file-list.grid-view .entry-size {
 	display: none;
@@ -265,7 +326,7 @@ main {
 
 .empty-state,
 .status {
-	padding: 44px 20px;
+	padding: 44px 0px;
 	color: var(--vscode-descriptionForeground);
 	text-align: center;
 }
@@ -327,6 +388,8 @@ main {
 	}
 
 	.column-header span:nth-child(2),
+	.column-header span:nth-child(3),
+	.file-list.list-view .entry-created,
 	.file-list.list-view .entry-modified {
 		display: none;
 	}

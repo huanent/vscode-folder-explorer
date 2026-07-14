@@ -2,7 +2,6 @@
 	const vscode = acquireVsCodeApi();
 	const elements = {
 		backButton: document.getElementById('backButton'),
-		upButton: document.getElementById('upButton'),
 		refreshButton: document.getElementById('refreshButton'),
 		breadcrumbs: document.getElementById('breadcrumbs'),
 		listViewButton: document.getElementById('listViewButton'),
@@ -50,7 +49,6 @@
 		elements.emptyState.hidden = state.entries.length !== 0;
 		elements.status.hidden = true;
 		elements.backButton.disabled = state.history.length === 0;
-		elements.upButton.disabled = state.currentUri === state.rootUri;
 		updateViewButtons();
 		vscode.setState({ view: state.view });
 	}
@@ -74,10 +72,46 @@
 		const modified = document.createElement('span');
 		modified.className = 'entry-modified';
 		modified.textContent = formatDate(entry.modified);
+		const created = document.createElement('span');
+		created.className = 'entry-created';
+		created.textContent = formatDate(entry.created);
 		const size = document.createElement('span');
 		size.className = 'entry-size';
-		size.textContent = entry.type === 'directory' ? '' : formatSize(entry.size);
-		item.append(name, modified, size);
+		if (entry.type === 'directory') {
+			if (entry.calculatedSize !== undefined) {
+				const sizeLabel = document.createElement('span');
+				sizeLabel.textContent = formatSize(entry.calculatedSize);
+				size.append(sizeLabel);
+			} else {
+				const calculateButton = document.createElement('button');
+				calculateButton.type = 'button';
+				calculateButton.className = 'calculate-size-button';
+				calculateButton.title = entry.calculating
+					? 'Calculating folder size'
+					: 'Calculate folder size (Command/Ctrl+click calculates all folders)';
+				calculateButton.setAttribute('aria-label', calculateButton.title);
+				calculateButton.disabled = entry.calculating;
+				const calculateIcon = document.createElement('i');
+				calculateIcon.className = `codicon ${entry.calculating ? 'codicon-loading codicon-modifier-spin' : 'codicon-refresh'}`;
+				calculateButton.append(calculateIcon);
+				calculateButton.addEventListener('click', event => {
+					event.stopPropagation();
+					const entries = event.metaKey || event.ctrlKey
+						? state.entries.filter(item => item.type === 'directory' && item.calculatedSize === undefined && !item.calculating)
+						: [entry];
+					entries.forEach(item => {
+						item.calculating = true;
+						vscode.postMessage({ type: 'calculateDirectorySize', uri: item.uri });
+					});
+					render();
+				});
+				calculateButton.addEventListener('dblclick', event => event.stopPropagation());
+				size.append(calculateButton);
+			}
+		} else {
+			size.textContent = formatSize(entry.size);
+		}
+		item.append(name, created, modified, size);
 
 		item.addEventListener('click', () => selectEntry(item));
 		item.addEventListener('dblclick', () => openEntry(entry));
@@ -162,14 +196,6 @@
 		elements.gridViewButton.setAttribute('aria-pressed', String(!isList));
 	}
 
-	function getParentUri(uri) {
-		const parent = new URL(uri);
-		const parts = decodeURIComponent(parent.pathname).split('/').filter(Boolean);
-		parts.pop();
-		parent.pathname = `/${parts.join('/')}`;
-		return parent.toString();
-	}
-
 	function getFileIcon(name) {
 		const extension = name.split('.').pop().toLowerCase();
 		if (['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'ico'].includes(extension)) {
@@ -212,7 +238,6 @@
 			requestDirectory(target, false);
 		}
 	});
-	elements.upButton.addEventListener('click', () => requestDirectory(getParentUri(state.currentUri), true));
 	elements.refreshButton.addEventListener('click', () => requestDirectory(state.currentUri, false));
 	elements.listViewButton.addEventListener('click', () => setView('list'));
 	elements.gridViewButton.addEventListener('click', () => setView('grid'));
@@ -242,6 +267,21 @@
 			render();
 		} else if (message.type === 'deleted') {
 			requestDirectory(state.currentUri, false);
+		} else if (message.type === 'directorySize') {
+			const entry = state.entries.find(item => item.uri === message.uri);
+			if (entry) {
+				entry.calculating = false;
+				entry.calculatedSize = message.size;
+				render();
+			}
+		} else if (message.type === 'directorySizeError') {
+			const entry = state.entries.find(item => item.uri === message.uri);
+			if (entry) {
+				entry.calculating = false;
+				render();
+			}
+			elements.status.textContent = message.message;
+			elements.status.hidden = false;
 		} else if (message.type === 'error') {
 			elements.status.textContent = message.message;
 			elements.status.hidden = false;

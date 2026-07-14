@@ -28,7 +28,7 @@
         {
           "command": "fileExplorer.openInEditorArea",
           "when": "explorerResourceIsFolder",
-          "group": "navigation@20"
+          "group": "navigation@999"
         }
       ]
     }

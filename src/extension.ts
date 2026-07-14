@@ -5,6 +5,7 @@ interface FileEntry {
 	uri: string;
 	type: 'file' | 'directory';
 	size: number;
+	created: number;
 	modified: number;
 }
 
@@ -12,6 +13,7 @@ type WebviewMessage =
 	| { type: 'ready' }
 	| { type: 'readDirectory'; uri: string }
 	| { type: 'openFile'; uri: string }
+	| { type: 'calculateDirectorySize'; uri: string }
 	| { type: 'delete'; uri: string };
 
 export function activate(context: vscode.ExtensionContext) {
@@ -34,6 +36,7 @@ function openFileExplorer(context: vscode.ExtensionContext, rootUri: vscode.Uri)
 		vscode.ViewColumn.Active,
 		{
 			enableScripts: true,
+			retainContextWhenHidden: true,
 			localResourceRoots: [
 				vscode.Uri.joinPath(context.extensionUri, 'media'),
 				vscode.Uri.joinPath(context.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist')
@@ -58,6 +61,17 @@ function openFileExplorer(context: vscode.ExtensionContext, rootUri: vscode.Uri)
 					case 'openFile': {
 						const fileUri = getSafeUri(rootUri, message.uri);
 						await vscode.commands.executeCommand('vscode.open', fileUri);
+						break;
+					}
+					case 'calculateDirectorySize': {
+						const directoryUri = getSafeUri(rootUri, message.uri);
+						try {
+							const size = await calculateDirectorySize(directoryUri);
+							await panel.webview.postMessage({ type: 'directorySize', uri: message.uri, size });
+						} catch (error) {
+							const errorMessage = error instanceof Error ? error.message : String(error);
+							await panel.webview.postMessage({ type: 'directorySizeError', uri: message.uri, message: errorMessage });
+						}
 						break;
 					}
 					case 'delete': {
@@ -90,6 +104,7 @@ async function sendDirectory(webview: vscode.Webview, rootUri: vscode.Uri, direc
 				uri: uri.toString(),
 				type: fileType & vscode.FileType.Directory ? 'directory' : 'file',
 				size: stat.size,
+				created: stat.ctime,
 				modified: stat.mtime
 			};
 		})
@@ -108,6 +123,25 @@ async function sendDirectory(webview: vscode.Webview, rootUri: vscode.Uri, direc
 		currentUri: directoryUri.toString(),
 		entries
 	});
+}
+
+async function calculateDirectorySize(directoryUri: vscode.Uri): Promise<number> {
+	const entries = await vscode.workspace.fs.readDirectory(directoryUri);
+	let size = 0;
+
+	for (const [name, fileType] of entries) {
+		const uri = vscode.Uri.joinPath(directoryUri, name);
+		if (fileType & vscode.FileType.SymbolicLink) {
+			continue;
+		}
+		if (fileType & vscode.FileType.Directory) {
+			size += await calculateDirectorySize(uri);
+		} else {
+			size += (await vscode.workspace.fs.stat(uri)).size;
+		}
+	}
+
+	return size;
 }
 
 async function deleteEntry(webview: vscode.Webview, targetUri: vscode.Uri): Promise<void> {
@@ -165,7 +199,6 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootU
 	<header class="toolbar">
 		<div class="navigation-actions" role="toolbar" aria-label="Navigation">
 			<button id="backButton" class="icon-button" type="button" title="Back" aria-label="Back" disabled><i class="codicon codicon-arrow-left"></i></button>
-			<button id="upButton" class="icon-button" type="button" title="Up one level" aria-label="Up one level" disabled><i class="codicon codicon-arrow-up"></i></button>
 			<button id="refreshButton" class="icon-button" type="button" title="Refresh" aria-label="Refresh"><i class="codicon codicon-refresh"></i></button>
 		</div>
 		<nav id="breadcrumbs" class="breadcrumbs" aria-label="Folder path"></nav>
@@ -176,7 +209,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootU
 	</header>
 	<main>
 		<div id="columnHeader" class="column-header">
-			<span>Name</span><span>Modified</span><span>Size</span>
+			<span>Name</span><span>Created</span><span>Modified</span><span>Size</span>
 		</div>
 		<div id="fileList" class="file-list list-view" role="listbox" aria-label="Folder contents"></div>
 		<div id="emptyState" class="empty-state" hidden>This folder is empty.</div>
