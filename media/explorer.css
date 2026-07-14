@@ -256,6 +256,19 @@ main {
 	cursor: pointer;
 }
 
+.calculate-size-button .codicon {
+	display: block;
+	width: 16px;
+	height: 16px;
+	line-height: 16px;
+	transform-origin: 50% 50%;
+}
+
+.calculate-size-button .codicon-loading.codicon-modifier-spin {
+	animation-duration: 1s !important;
+	animation-timing-function: linear !important;
+}
+
 .calculate-size-button:hover:not(:disabled) {
 	background: var(--vscode-toolbar-hoverBackground);
 }

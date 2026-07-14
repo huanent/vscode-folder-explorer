@@ -75,6 +75,21 @@
 		const created = document.createElement('span');
 		created.className = 'entry-created';
 		created.textContent = formatDate(entry.created);
+		const size = createEntrySizeElement(entry);
+		item.append(name, created, modified, size);
+
+		item.addEventListener('click', () => selectEntry(item));
+		item.addEventListener('dblclick', () => openEntry(entry));
+		item.addEventListener('keydown', event => {
+			if (event.key === 'Enter') {
+				openEntry(entry);
+			}
+		});
+		item.addEventListener('contextmenu', event => showContextMenu(event, entry, item));
+		return item;
+	}
+
+	function createEntrySizeElement(entry) {
 		const size = document.createElement('span');
 		size.className = 'entry-size';
 		if (entry.type === 'directory') {
@@ -111,17 +126,15 @@
 		} else {
 			size.textContent = formatSize(entry.size);
 		}
-		item.append(name, created, modified, size);
+		return size;
+	}
 
-		item.addEventListener('click', () => selectEntry(item));
-		item.addEventListener('dblclick', () => openEntry(entry));
-		item.addEventListener('keydown', event => {
-			if (event.key === 'Enter') {
-				openEntry(entry);
-			}
-		});
-		item.addEventListener('contextmenu', event => showContextMenu(event, entry, item));
-		return item;
+	function updateEntrySize(entry) {
+		const item = Array.from(elements.fileList.children).find(element => element.dataset.uri === entry.uri);
+		const size = item?.querySelector('.entry-size');
+		if (size) {
+			size.replaceWith(createEntrySizeElement(entry));
+		}
 	}
 
 	function selectEntry(item) {
@@ -272,13 +285,13 @@
 			if (entry) {
 				entry.calculating = false;
 				entry.calculatedSize = message.size;
-				render();
+				updateEntrySize(entry);
 			}
 		} else if (message.type === 'directorySizeError') {
 			const entry = state.entries.find(item => item.uri === message.uri);
 			if (entry) {
 				entry.calculating = false;
-				render();
+				updateEntrySize(entry);
 			}
 			elements.status.textContent = message.message;
 			elements.status.hidden = false;
