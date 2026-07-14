@@ -1,78 +1,25 @@
 {
-  "name": "node-runner",
-  "displayName": "Node.js Script Runner",
-  "description": "One click run or debug Node.js script",
+  "name": "file-explorer",
+  "displayName": "File Explorer",
+  "description": "右键在编辑区浏览文件夹",
   "version": "1.0.2",
   "publisher": "huanent",
   "icon": "resources/logo.png",
   "repository": {
-    "url": "https://github.com/huanent/vscode-node-runner.git",
+    "url": "https://github.com/huanent/vscode-file-explorer.git",
     "type": "github"
   },
   "license": "MIT",
-  "homepage": "https://github.com/huanent/vscode-node-runner",
+  "homepage": "https://github.com/huanent/vscode-file-explorer",
   "engines": {
     "vscode": "^1.100.0"
   },
   "categories": [
-    "Testing",
-    "Debuggers",
-    "Programming Languages",
-    "Keymaps"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
-      {
-        "command": "node-runner.run-script",
-        "title": "Run with Node.js",
-        "icon": "$(play)",
-        "category": "node-runner"
-      },
-      {
-        "command": "node-runner.debug-script",
-        "title": "Debug with Node.js",
-        "icon": "$(debug)",
-        "category": "node-runner"
-      }
-    ],
-    "menus": {
-      "explorer/context": [
-        {
-          "command": "node-runner.run-script",
-          "when": "resourceLangId == javascript || resourceLangId == typescript",
-          "group": "node-runner"
-        },
-        {
-          "command": "node-runner.debug-script",
-          "when": "resourceLangId == javascript || resourceLangId == typescript",
-          "group": "node-runner"
-        }
-      ],
-      "editor/title": [
-        {
-          "when": "resourceLangId == javascript || resourceLangId == typescript",
-          "command": "node-runner.run-script",
-          "group": "navigation"
-        },
-        {
-          "when": "resourceScheme != untitled && (resourceLangId == javascript || resourceLangId == typescript)",
-          "command": "node-runner.debug-script",
-          "group": "navigation"
-        }
-      ]
-    },
-    "keybindings": [
-      {
-        "command": "node-runner.run-script",
-        "key": "ctrl+n",
-        "when": "resourceLangId == javascript || resourceLangId == typescript"
-      },
-      {
-        "command": "node-runner.debug-script",
-        "key": "ctrl+alt+n",
-        "when": "resourceScheme != untitled && (resourceLangId == javascript || resourceLangId == typescript)"
-      }
+      
     ]
   },
   "scripts": {
