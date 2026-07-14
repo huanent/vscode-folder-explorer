@@ -1,16 +1,15 @@
 {
-  "name": "file-explorer",
-  "displayName": "File Explorer",
-  "description": "右键在编辑区浏览文件夹",
-  "version": "1.0.2",
+  "name": "vscode-open-folder-in-editor",
+  "displayName": "Open Folder in Editor",
+  "description": "Open a folder from the Explorer in a dedicated editor-based file browser",
+  "version": "0.1.0",
   "publisher": "huanent",
-  "icon": "resources/logo.png",
   "repository": {
-    "url": "https://github.com/huanent/vscode-file-explorer.git",
+    "url": "https://github.com/huanent/vscode-open-folder-in-editor.git",
     "type": "github"
   },
   "license": "MIT",
-  "homepage": "https://github.com/huanent/vscode-file-explorer",
+  "homepage": "https://github.com/huanent/vscode-open-folder-in-editor",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -19,14 +18,14 @@
   "contributes": {
     "commands": [
       {
-        "command": "fileExplorer.openInEditorArea",
-        "title": "Open in Editor Area"
+        "command": "openFolderInEditor.open",
+        "title": "Open Folder in Editor"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "fileExplorer.openInEditorArea",
+          "command": "openFolderInEditor.open",
           "when": "explorerResourceIsFolder",
           "group": "navigation@999"
         }

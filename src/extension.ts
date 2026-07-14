@@ -18,9 +18,9 @@ type WebviewMessage =
 
 export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
-		vscode.commands.registerCommand('fileExplorer.openInEditorArea', (uri: vscode.Uri) => {
+		vscode.commands.registerCommand('openFolderInEditor.open', (uri: vscode.Uri) => {
 			if (uri) {
-				openFileExplorer(context, uri);
+				openFolderInEditor(context, uri);
 			}
 		})
 	);
@@ -28,10 +28,10 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() { }
 
-function openFileExplorer(context: vscode.ExtensionContext, rootUri: vscode.Uri): void {
+function openFolderInEditor(context: vscode.ExtensionContext, rootUri: vscode.Uri): void {
 	const folderName = getDisplayName(rootUri);
 	const panel = vscode.window.createWebviewPanel(
-		'fileExplorer.editorArea',
+		'openFolderInEditor.editor',
 		folderName,
 		vscode.ViewColumn.Active,
 		{
@@ -44,7 +44,10 @@ function openFileExplorer(context: vscode.ExtensionContext, rootUri: vscode.Uri)
 		}
 	);
 
-	panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'logo.png');
+	panel.iconPath = {
+		light: vscode.Uri.joinPath(context.extensionUri, 'resources', 'folder-light.svg'),
+		dark: vscode.Uri.joinPath(context.extensionUri, 'resources', 'folder-dark.svg')
+	};
 	panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri, rootUri, folderName);
 	panel.webview.onDidReceiveMessage(
 		async (message: WebviewMessage) => {
