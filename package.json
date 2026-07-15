@@ -1,15 +1,15 @@
 {
-  "name": "vscode-open-folder-in-editor",
-  "displayName": "Open Folder in Editor",
-  "description": "Open a folder from the Explorer in a dedicated editor-based file browser",
+  "name": "vscode-folder-explorer",
+  "displayName": "Folder Explorer",
+  "description": "Explore folders in the VS Code editor area",
   "version": "0.2.0",
   "publisher": "huanent",
   "repository": {
-    "url": "https://github.com/huanent/vscode-open-folder-in-editor.git",
+    "url": "https://github.com/huanent/vscode-folder-explorer.git",
     "type": "github"
   },
   "license": "MIT",
-  "homepage": "https://github.com/huanent/vscode-open-folder-in-editor",
+  "homepage": "https://github.com/huanent/vscode-folder-explorer",
   "engines": {
     "vscode": "^1.100.0"
   },
@@ -18,14 +18,14 @@
   "contributes": {
     "commands": [
       {
-        "command": "openFolderInEditor.open",
-        "title": "Open Folder in Editor"
+        "command": "folderExplorer.open",
+        "title": "Open in Folder Explorer"
       }
     ],
     "menus": {
       "explorer/context": [
         {
-          "command": "openFolderInEditor.open",
+          "command": "folderExplorer.open",
           "when": "explorerResourceIsFolder",
           "group": "navigation@999"
         }

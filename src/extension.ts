@@ -28,9 +28,9 @@ interface ClipboardState {
 
 export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
-		vscode.commands.registerCommand('openFolderInEditor.open', (uri: vscode.Uri) => {
+		vscode.commands.registerCommand('folderExplorer.open', (uri: vscode.Uri) => {
 			if (uri) {
-				openFolderInEditor(context, uri);
+				openFolderExplorer(context, uri);
 			}
 		})
 	);
@@ -38,11 +38,11 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() { }
 
-function openFolderInEditor(context: vscode.ExtensionContext, rootUri: vscode.Uri): void {
+function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Uri): void {
 	const folderName = getDisplayName(rootUri);
 	let clipboardState: ClipboardState | undefined;
 	const panel = vscode.window.createWebviewPanel(
-		'openFolderInEditor.editor',
+		'folderExplorer.editor',
 		folderName,
 		vscode.ViewColumn.Active,
 		{
