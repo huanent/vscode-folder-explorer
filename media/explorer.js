@@ -24,12 +24,20 @@
 		status: document.getElementById('status')
 	};
 	const previousState = vscode.getState() || {};
+	const rootUri = document.body.dataset.rootUri;
+	const initialHistory = JSON.parse(document.body.dataset.history || '[]');
 	const state = {
-		rootUri: document.body.dataset.rootUri,
-		currentUri: document.body.dataset.rootUri,
+		rootUri,
+		currentUri: previousState.rootUri === rootUri && previousState.currentUri
+			? previousState.currentUri
+			: document.body.dataset.currentUri || rootUri,
 		entries: [],
-		history: [],
-		view: previousState.view === 'grid' ? 'grid' : 'list',
+		history: previousState.rootUri === rootUri && Array.isArray(previousState.history)
+			? previousState.history
+			: initialHistory,
+		view: previousState.view === 'grid' || (!previousState.view && document.body.dataset.view === 'grid')
+			? 'grid'
+			: 'list',
 		contextEntry: null,
 		selectionAnchorUri: null,
 		hasClipboardEntry: false,
@@ -40,6 +48,8 @@
 		if (addToHistory && uri !== state.currentUri) {
 			state.history.push(state.currentUri);
 		}
+		state.currentUri = uri;
+		saveState();
 		hideContextMenu();
 		elements.status.textContent = 'Loading...';
 		elements.status.hidden = false;
@@ -67,7 +77,22 @@
 		elements.status.hidden = true;
 		elements.backButton.disabled = state.history.length === 0;
 		updateViewButtons();
-		vscode.setState({ view: state.view });
+		saveState();
+	}
+
+	function saveState() {
+		vscode.setState({
+			rootUri: state.rootUri,
+			currentUri: state.currentUri,
+			history: state.history,
+			view: state.view
+		});
+		vscode.postMessage({
+			type: 'stateChanged',
+			currentUri: state.currentUri,
+			history: state.history,
+			view: state.view
+		});
 	}
 
 	function createEntryElement(entry) {
@@ -262,7 +287,7 @@
 		elements.copyButton.disabled = !hasSelection;
 		elements.copyPathButton.disabled = !hasSelection;
 		elements.renameButton.disabled = selectedEntries.length !== 1;
-		elements.openInTerminalButton.hidden = !(
+		elements.openInTerminalButton.hidden = hasSelection && !(
 			selectedEntries.length === 1
 			&& selectedEntries[0].type === 'directory'
 			&& selectedEntries[0].uri === entry?.uri
@@ -331,9 +356,8 @@
 	}
 
 	function openInTerminal(entry) {
-		if (entry?.type === 'directory') {
-			vscode.postMessage({ type: 'openInTerminal', uri: entry.uri });
-		}
+		const uri = entry?.type === 'directory' ? entry.uri : state.currentUri;
+		vscode.postMessage({ type: 'openInTerminal', uri });
 	}
 
 	function compressEntries(entries) {
@@ -540,5 +564,5 @@
 			: element.dataset.other;
 	});
 	updateViewButtons();
-	vscode.postMessage({ type: 'ready' });
+	vscode.postMessage({ type: 'ready', currentUri: state.currentUri });
 }());

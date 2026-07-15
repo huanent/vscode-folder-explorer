@@ -1,4 +1,5 @@
 import { homedir } from 'node:os';
+import { randomUUID } from 'node:crypto';
 import * as vscode from 'vscode';
 import JSZip = require('jszip');
 
@@ -12,7 +13,8 @@ interface FileEntry {
 }
 
 type WebviewMessage =
-	| { type: 'ready' }
+	| { type: 'ready'; currentUri?: string }
+	| { type: 'stateChanged'; currentUri: string; history: string[]; view: 'list' | 'grid' }
 	| { type: 'readDirectory'; uri: string }
 	| { type: 'openFile'; uri: string }
 	| { type: 'calculateDirectorySize'; uri: string }
@@ -30,7 +32,45 @@ interface ClipboardState {
 	operation: 'cut' | 'copy';
 }
 
+interface ExplorerViewState {
+	currentUri: string;
+	history: string[];
+	view: 'list' | 'grid';
+}
+
+class ExplorerDocument implements vscode.CustomDocument {
+	latestViewState: ExplorerViewState;
+
+	constructor(readonly uri: vscode.Uri, readonly rootUri: vscode.Uri) {
+		this.latestViewState = {
+			currentUri: rootUri.toString(),
+			history: [],
+			view: 'list'
+		};
+	}
+
+	dispose(): void { }
+}
+
+const explorerViewType = 'folderExplorer.editor';
+
+let clipboardState: ClipboardState | undefined;
+const explorerPanels = new Set<vscode.WebviewPanel>();
+
 export function activate(context: vscode.ExtensionContext) {
+	const editorProvider: vscode.CustomReadonlyEditorProvider<ExplorerDocument> = {
+		openCustomDocument: uri => {
+			const rootValue = new URLSearchParams(uri.query).get('root');
+			if (!rootValue) {
+				throw new Error('The folder explorer resource does not contain a root folder.');
+			}
+			return new ExplorerDocument(uri, vscode.Uri.parse(rootValue));
+		},
+		resolveCustomEditor: (document, panel) => {
+			configureExplorerPanel(context, panel, document);
+		}
+	};
+
 	context.subscriptions.push(
 		vscode.commands.registerCommand('folderExplorer.open', async (uri?: vscode.Uri) => {
 			const rootUri = uri ?? (await vscode.window.showOpenDialog({
@@ -41,40 +81,64 @@ export function activate(context: vscode.ExtensionContext) {
 				openLabel: 'Open'
 			}))?.[0];
 			if (rootUri) {
-				openFolderExplorer(context, rootUri);
+				await openFolderExplorer(rootUri);
 			}
+		}),
+		vscode.window.registerCustomEditorProvider(explorerViewType, editorProvider, {
+			supportsMultipleEditorsPerDocument: true,
+			webviewOptions: { retainContextWhenHidden: true }
 		})
 	);
 }
 
 export function deactivate() { }
 
-function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Uri): void {
+async function openFolderExplorer(rootUri: vscode.Uri): Promise<void> {
 	const folderName = getDisplayName(rootUri);
-	let clipboardState: ClipboardState | undefined;
-	const panel = vscode.window.createWebviewPanel(
-		'folderExplorer.editor',
-		folderName,
-		vscode.ViewColumn.Active,
-		{
-			enableScripts: true,
-			retainContextWhenHidden: true,
-			localResourceRoots: [
-				vscode.Uri.joinPath(context.extensionUri, 'media'),
-				vscode.Uri.joinPath(context.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist')
-			]
-		}
-	);
+	const resourceUri = vscode.Uri.from({
+		scheme: 'folder-explorer',
+		path: `/${folderName}.folder-explorer`,
+		query: new URLSearchParams({ root: rootUri.toString(), id: randomUUID() }).toString()
+	});
+	await vscode.commands.executeCommand('vscode.openWith', resourceUri, explorerViewType, {
+		preview: false,
+		viewColumn: vscode.ViewColumn.Active
+	});
+}
 
+function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.WebviewPanel, document: ExplorerDocument): void {
+	const rootUri = document.rootUri;
+	const folderName = getDisplayName(rootUri);
+	panel.title = folderName;
+	panel.webview.options = {
+		enableScripts: true,
+		localResourceRoots: [
+			vscode.Uri.joinPath(context.extensionUri, 'media'),
+			vscode.Uri.joinPath(context.extensionUri, 'node_modules', '@vscode', 'codicons', 'dist')
+		]
+	};
 	panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'logo.svg');
-	panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri, rootUri, folderName);
+	explorerPanels.add(panel);
+	panel.onDidDispose(() => explorerPanels.delete(panel), undefined, context.subscriptions);
 	panel.webview.onDidReceiveMessage(
 		async (message: WebviewMessage) => {
 			try {
 				switch (message.type) {
-					case 'ready':
-						await sendDirectory(panel.webview, rootUri, rootUri);
+					case 'stateChanged':
+						document.latestViewState = {
+							currentUri: getSafeUri(rootUri, message.currentUri).toString(),
+							history: message.history.map(uri => getSafeUri(rootUri, uri).toString()),
+							view: message.view
+						};
 						break;
+					case 'ready': {
+						const currentUri = message.currentUri ? getSafeUri(rootUri, message.currentUri) : rootUri;
+						await sendDirectory(panel.webview, rootUri, currentUri);
+						if (clipboardState) {
+							await sendClipboardState(panel.webview, clipboardState);
+						}
+						break;
+					}
 					case 'readDirectory': {
 						const directoryUri = getSafeUri(rootUri, message.uri);
 						await sendDirectory(panel.webview, rootUri, directoryUri);
@@ -101,7 +165,7 @@ function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Ur
 							uris: message.uris.map(uri => getSafeUri(rootUri, uri)),
 							operation: message.operation
 						};
-						await sendClipboardState(panel.webview, clipboardState);
+						await broadcastClipboardState(clipboardState);
 						break;
 					}
 					case 'paste': {
@@ -113,7 +177,7 @@ function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Ur
 						if (clipboardState.operation === 'cut' && completedUris.length > 0) {
 							const completed = new Set(completedUris.map(uri => uri.toString()));
 							clipboardState.uris = clipboardState.uris.filter(uri => !completed.has(uri.toString()));
-							await sendClipboardState(panel.webview, clipboardState);
+							await broadcastClipboardState(clipboardState);
 						}
 						if (completedUris.length > 0) {
 							await panel.webview.postMessage({ type: 'pasted' });
@@ -173,6 +237,17 @@ function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Ur
 		undefined,
 		context.subscriptions
 	);
+	panel.webview.html = getWebviewHtml(
+		panel.webview,
+		context.extensionUri,
+		rootUri,
+		folderName,
+		document.latestViewState
+	);
+}
+
+async function broadcastClipboardState(state: ClipboardState): Promise<void> {
+	await Promise.all([...explorerPanels].map(panel => sendClipboardState(panel.webview, state)));
 }
 
 async function sendClipboardState(webview: vscode.Webview, clipboardState: ClipboardState): Promise<void> {
@@ -487,7 +562,13 @@ function getDisplayName(uri: vscode.Uri): string {
 	return decodeURIComponent(segments.at(-1) ?? uri.path);
 }
 
-function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootUri: vscode.Uri, folderName: string): string {
+function getWebviewHtml(
+	webview: vscode.Webview,
+	extensionUri: vscode.Uri,
+	rootUri: vscode.Uri,
+	folderName: string,
+	initialViewState: ExplorerViewState
+): string {
 	const nonce = getNonce();
 	const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'explorer.css'));
 	const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'explorer.js'));
@@ -505,7 +586,12 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootU
 	<link rel="stylesheet" href="${styleUri}">
 	<title>${escapeHtml(folderName)}</title>
 </head>
-<body data-root-uri="${escapeHtml(rootUri.toString())}">
+<body
+	data-root-uri="${escapeHtml(rootUri.toString())}"
+	data-current-uri="${escapeHtml(initialViewState.currentUri)}"
+	data-history="${escapeHtml(JSON.stringify(initialViewState.history))}"
+	data-view="${initialViewState.view}"
+>
 	<header class="toolbar">
 		<div class="navigation-actions" role="toolbar" aria-label="Navigation">
 			<button id="backButton" class="icon-button" type="button" title="Back" aria-label="Back" disabled><i class="codicon codicon-arrow-left"></i></button>
