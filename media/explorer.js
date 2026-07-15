@@ -14,6 +14,9 @@
 		cutButton: document.getElementById('cutButton'),
 		copyButton: document.getElementById('copyButton'),
 		pasteButton: document.getElementById('pasteButton'),
+		copyPathButton: document.getElementById('copyPathButton'),
+		renameButton: document.getElementById('renameButton'),
+		openInTerminalButton: document.getElementById('openInTerminalButton'),
 		deleteButton: document.getElementById('deleteButton'),
 		status: document.getElementById('status')
 	};
@@ -25,6 +28,7 @@
 		history: [],
 		view: previousState.view === 'grid' ? 'grid' : 'list',
 		contextEntry: null,
+		selectionAnchorUri: null,
 		hasClipboardEntry: false
 	};
 
@@ -83,11 +87,15 @@
 		const size = createEntrySizeElement(entry);
 		item.append(name, created, modified, size);
 
-		item.addEventListener('click', () => selectEntry(item));
+		item.addEventListener('click', event => selectEntry(item, event));
 		item.addEventListener('dblclick', () => openEntry(entry));
 		item.addEventListener('keydown', event => {
 			if (event.key === 'Enter') {
-				openEntry(entry);
+				const selectedEntries = getSelectedEntries();
+				if (selectedEntries.length === 1) {
+					event.preventDefault();
+					renameEntry(selectedEntries[0]);
+				}
 			}
 		});
 		item.addEventListener('contextmenu', event => showContextMenu(event, entry, item));
@@ -142,15 +150,54 @@
 		}
 	}
 
-	function selectEntry(item) {
-		elements.fileList.querySelectorAll('.selected').forEach(element => element.classList.remove('selected'));
-		item.classList.add('selected');
+	function selectEntry(item, event = {}) {
+		const items = Array.from(elements.fileList.querySelectorAll('.file-entry'));
+		if (event.shiftKey && state.selectionAnchorUri) {
+			const anchorIndex = items.findIndex(element => element.dataset.uri === state.selectionAnchorUri);
+			const targetIndex = items.indexOf(item);
+			if (anchorIndex >= 0 && targetIndex >= 0) {
+				if (!event.metaKey && !event.ctrlKey) {
+					items.forEach(element => element.classList.remove('selected'));
+				}
+				const start = Math.min(anchorIndex, targetIndex);
+				const end = Math.max(anchorIndex, targetIndex);
+				items.slice(start, end + 1).forEach(element => element.classList.add('selected'));
+			}
+		} else if (event.metaKey || event.ctrlKey) {
+			item.classList.toggle('selected');
+			state.selectionAnchorUri = item.dataset.uri;
+		} else {
+			items.forEach(element => element.classList.remove('selected'));
+			item.classList.add('selected');
+			state.selectionAnchorUri = item.dataset.uri;
+		}
+		items.forEach(element => element.setAttribute('aria-selected', String(element.classList.contains('selected'))));
 		item.focus({ preventScroll: true });
 	}
 
-	function getSelectedEntry() {
-		const selectedUri = elements.fileList.querySelector('.file-entry.selected')?.dataset.uri;
-		return state.entries.find(entry => entry.uri === selectedUri) || null;
+	function clearSelection() {
+		elements.fileList.querySelectorAll('.file-entry.selected').forEach(element => {
+			element.classList.remove('selected');
+			element.setAttribute('aria-selected', 'false');
+		});
+		state.selectionAnchorUri = null;
+	}
+
+	function selectAllEntries() {
+		window.getSelection()?.removeAllRanges();
+		const items = Array.from(elements.fileList.querySelectorAll('.file-entry'));
+		items.forEach(element => {
+			element.classList.add('selected');
+			element.setAttribute('aria-selected', 'true');
+		});
+		state.selectionAnchorUri = items.at(-1)?.dataset.uri || null;
+	}
+
+	function getSelectedEntries() {
+		const selectedUris = new Set(
+			Array.from(elements.fileList.querySelectorAll('.file-entry.selected')).map(element => element.dataset.uri)
+		);
+		return state.entries.filter(entry => selectedUris.has(entry.uri));
 	}
 
 	function renderBreadcrumbs() {
@@ -193,12 +240,25 @@
 		event.preventDefault();
 		event.stopPropagation();
 		if (item) {
-			selectEntry(item);
+			if (!item.classList.contains('selected')) {
+				selectEntry(item);
+			}
+		} else {
+			clearSelection();
 		}
 		state.contextEntry = entry || null;
-		elements.cutButton.disabled = !entry;
-		elements.copyButton.disabled = !entry;
-		elements.deleteButton.disabled = !entry;
+		const selectedEntries = getSelectedEntries();
+		const hasSelection = selectedEntries.length > 0;
+		elements.cutButton.disabled = !hasSelection;
+		elements.copyButton.disabled = !hasSelection;
+		elements.copyPathButton.disabled = !hasSelection;
+		elements.renameButton.disabled = selectedEntries.length !== 1;
+		elements.openInTerminalButton.hidden = !(
+			selectedEntries.length === 1
+			&& selectedEntries[0].type === 'directory'
+			&& selectedEntries[0].uri === entry?.uri
+		);
+		elements.deleteButton.disabled = !hasSelection;
 		elements.pasteButton.disabled = !state.hasClipboardEntry;
 		elements.contextMenu.hidden = false;
 		const width = elements.contextMenu.offsetWidth;
@@ -225,15 +285,15 @@
 		elements.gridViewButton.setAttribute('aria-pressed', String(!isList));
 	}
 
-	function cutEntry(entry) {
-		if (entry) {
-			vscode.postMessage({ type: 'setClipboard', operation: 'cut', uri: entry.uri });
+	function cutEntries(entries) {
+		if (entries.length > 0) {
+			vscode.postMessage({ type: 'setClipboard', operation: 'cut', uris: entries.map(entry => entry.uri) });
 		}
 	}
 
-	function copyEntry(entry) {
-		if (entry) {
-			vscode.postMessage({ type: 'setClipboard', operation: 'copy', uri: entry.uri });
+	function copyEntries(entries) {
+		if (entries.length > 0) {
+			vscode.postMessage({ type: 'setClipboard', operation: 'copy', uris: entries.map(entry => entry.uri) });
 		}
 	}
 
@@ -243,9 +303,27 @@
 		}
 	}
 
-	function deleteEntry(entry) {
+	function renameEntry(entry) {
 		if (entry) {
-			vscode.postMessage({ type: 'delete', uri: entry.uri });
+			vscode.postMessage({ type: 'rename', uri: entry.uri });
+		}
+	}
+
+	function copyPaths(entries) {
+		if (entries.length > 0) {
+			vscode.postMessage({ type: 'copyPath', uris: entries.map(entry => entry.uri) });
+		}
+	}
+
+	function openInTerminal(entry) {
+		if (entry?.type === 'directory') {
+			vscode.postMessage({ type: 'openInTerminal', uri: entry.uri });
+		}
+	}
+
+	function deleteEntries(entries) {
+		if (entries.length > 0) {
+			vscode.postMessage({ type: 'delete', uris: entries.map(entry => entry.uri) });
 		}
 	}
 
@@ -294,13 +372,18 @@
 	elements.refreshButton.addEventListener('click', () => requestDirectory(state.currentUri, false));
 	elements.listViewButton.addEventListener('click', () => setView('list'));
 	elements.gridViewButton.addEventListener('click', () => setView('grid'));
+	elements.fileListRegion.addEventListener('click', event => {
+		if (!event.target.closest('.file-entry')) {
+			clearSelection();
+		}
+	});
 	elements.fileListRegion.addEventListener('contextmenu', event => showContextMenu(event));
 	elements.cutButton.addEventListener('click', () => {
-		cutEntry(state.contextEntry);
+		cutEntries(getSelectedEntries());
 		hideContextMenu();
 	});
 	elements.copyButton.addEventListener('click', () => {
-		copyEntry(state.contextEntry);
+		copyEntries(getSelectedEntries());
 		hideContextMenu();
 	});
 	elements.pasteButton.addEventListener('click', () => {
@@ -310,8 +393,20 @@
 		pasteEntry(destinationUri);
 		hideContextMenu();
 	});
+	elements.copyPathButton.addEventListener('click', () => {
+		copyPaths(getSelectedEntries());
+		hideContextMenu();
+	});
+	elements.renameButton.addEventListener('click', () => {
+		renameEntry(getSelectedEntries()[0]);
+		hideContextMenu();
+	});
+	elements.openInTerminalButton.addEventListener('click', () => {
+		openInTerminal(state.contextEntry);
+		hideContextMenu();
+	});
 	elements.deleteButton.addEventListener('click', () => {
-		deleteEntry(state.contextEntry);
+		deleteEntries(getSelectedEntries());
 		hideContextMenu();
 	});
 	document.addEventListener('click', event => {
@@ -321,28 +416,39 @@
 	});
 	document.addEventListener('keydown', event => {
 		if (event.key === 'Escape') {
+			event.preventDefault();
 			hideContextMenu();
+			clearSelection();
 			return;
 		}
 
-		const selectedEntry = getSelectedEntry();
+		const selectedEntries = getSelectedEntries();
 		if ((event.metaKey || event.ctrlKey) && !event.altKey) {
-			if (event.key.toLowerCase() === 'x' && selectedEntry) {
+			if (event.key.toLowerCase() === 'a') {
 				event.preventDefault();
-				cutEntry(selectedEntry);
-			} else if (event.key.toLowerCase() === 'c' && selectedEntry) {
+				selectAllEntries();
+			} else if (event.key.toLowerCase() === 'x' && selectedEntries.length > 0) {
 				event.preventDefault();
-				copyEntry(selectedEntry);
+				cutEntries(selectedEntries);
+			} else if (event.key.toLowerCase() === 'c' && selectedEntries.length > 0) {
+				event.preventDefault();
+				copyEntries(selectedEntries);
 			} else if (event.key.toLowerCase() === 'v' && state.hasClipboardEntry) {
 				event.preventDefault();
 				pasteEntry(state.currentUri);
-			} else if (event.metaKey && event.key === 'Backspace' && selectedEntry) {
+			} else if (event.metaKey && event.key === 'Backspace' && selectedEntries.length > 0) {
 				event.preventDefault();
-				deleteEntry(selectedEntry);
+				deleteEntries(selectedEntries);
 			}
-		} else if (event.key === 'Delete' && selectedEntry) {
+		} else if (event.altKey && event.key.toLowerCase() === 'c' && (event.metaKey || event.shiftKey) && selectedEntries.length > 0) {
 			event.preventDefault();
-			deleteEntry(selectedEntry);
+			copyPaths(selectedEntries);
+		} else if (event.key === 'F2' && selectedEntries.length === 1) {
+			event.preventDefault();
+			renameEntry(selectedEntries[0]);
+		} else if (event.key === 'Delete' && selectedEntries.length > 0) {
+			event.preventDefault();
+			deleteEntries(selectedEntries);
 		}
 	});
 	window.addEventListener('blur', hideContextMenu);
@@ -352,8 +458,9 @@
 			state.rootUri = message.rootUri;
 			state.currentUri = message.currentUri;
 			state.entries = message.entries;
+			state.selectionAnchorUri = null;
 			render();
-		} else if (message.type === 'deleted' || message.type === 'pasted') {
+		} else if (message.type === 'deleted' || message.type === 'pasted' || message.type === 'renamed') {
 			requestDirectory(state.currentUri, false);
 		} else if (message.type === 'clipboardChanged') {
 			state.hasClipboardEntry = message.hasEntry;

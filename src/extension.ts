@@ -14,12 +14,15 @@ type WebviewMessage =
 	| { type: 'readDirectory'; uri: string }
 	| { type: 'openFile'; uri: string }
 	| { type: 'calculateDirectorySize'; uri: string }
-	| { type: 'setClipboard'; uri: string; operation: 'cut' | 'copy' }
+	| { type: 'setClipboard'; uris: string[]; operation: 'cut' | 'copy' }
 	| { type: 'paste'; destinationUri: string }
-	| { type: 'delete'; uri: string };
+	| { type: 'rename'; uri: string }
+	| { type: 'copyPath'; uris: string[] }
+	| { type: 'openInTerminal'; uri: string }
+	| { type: 'delete'; uris: string[] };
 
-interface ClipboardEntry {
-	uri: vscode.Uri;
+interface ClipboardState {
+	uris: vscode.Uri[];
 	operation: 'cut' | 'copy';
 }
 
@@ -37,7 +40,7 @@ export function deactivate() { }
 
 function openFolderInEditor(context: vscode.ExtensionContext, rootUri: vscode.Uri): void {
 	const folderName = getDisplayName(rootUri);
-	let clipboardEntry: ClipboardEntry | undefined;
+	let clipboardState: ClipboardState | undefined;
 	const panel = vscode.window.createWebviewPanel(
 		'openFolderInEditor.editor',
 		folderName,
@@ -86,34 +89,57 @@ function openFolderInEditor(context: vscode.ExtensionContext, rootUri: vscode.Ur
 						break;
 					}
 					case 'setClipboard': {
-						clipboardEntry = {
-							uri: getSafeUri(rootUri, message.uri),
+						clipboardState = {
+							uris: message.uris.map(uri => getSafeUri(rootUri, uri)),
 							operation: message.operation
 						};
-						await panel.webview.postMessage({ type: 'clipboardChanged', hasEntry: true });
+						await panel.webview.postMessage({ type: 'clipboardChanged', hasEntry: clipboardState.uris.length > 0 });
 						break;
 					}
 					case 'paste': {
-						if (!clipboardEntry) {
+						if (!clipboardState?.uris.length) {
 							throw new Error('There is no item to paste.');
 						}
 						const destinationUri = getSafeUri(rootUri, message.destinationUri);
-						const completed = await pasteEntry(clipboardEntry, destinationUri);
-						if (completed && clipboardEntry.operation === 'cut') {
-							clipboardEntry = undefined;
-							await panel.webview.postMessage({ type: 'clipboardChanged', hasEntry: false });
+						const completedUris = await pasteEntries(clipboardState, destinationUri);
+						if (clipboardState.operation === 'cut' && completedUris.length > 0) {
+							const completed = new Set(completedUris.map(uri => uri.toString()));
+							clipboardState.uris = clipboardState.uris.filter(uri => !completed.has(uri.toString()));
+							await panel.webview.postMessage({ type: 'clipboardChanged', hasEntry: clipboardState.uris.length > 0 });
 						}
-						if (completed) {
+						if (completedUris.length > 0) {
 							await panel.webview.postMessage({ type: 'pasted' });
 						}
 						break;
 					}
-					case 'delete': {
+					case 'rename': {
 						const targetUri = getSafeUri(rootUri, message.uri);
-						if (targetUri.toString() === rootUri.toString()) {
+						if (await renameEntry(targetUri)) {
+							await panel.webview.postMessage({ type: 'renamed' });
+						}
+						break;
+					}
+					case 'copyPath': {
+						const targetUris = message.uris.map(uri => getSafeUri(rootUri, uri));
+						await vscode.env.clipboard.writeText(targetUris.map(uri => uri.fsPath).join('\n'));
+						break;
+					}
+					case 'openInTerminal': {
+						const directoryUri = getSafeUri(rootUri, message.uri);
+						const stat = await vscode.workspace.fs.stat(directoryUri);
+						if (!(stat.type & vscode.FileType.Directory)) {
+							throw new Error('Only folders can be opened in a terminal.');
+						}
+						const terminal = vscode.window.createTerminal({ cwd: directoryUri, name: getDisplayName(directoryUri) });
+						terminal.show();
+						break;
+					}
+					case 'delete': {
+						const targetUris = message.uris.map(uri => getSafeUri(rootUri, uri));
+						if (targetUris.some(uri => uri.toString() === rootUri.toString())) {
 							throw new Error('The root folder cannot be deleted.');
 						}
-						await deleteEntry(panel.webview, targetUri);
+						await deleteEntries(panel.webview, targetUris);
 						break;
 					}
 				}
@@ -128,7 +154,8 @@ function openFolderInEditor(context: vscode.ExtensionContext, rootUri: vscode.Ur
 }
 
 async function sendDirectory(webview: vscode.Webview, rootUri: vscode.Uri, directoryUri: vscode.Uri): Promise<void> {
-	const directoryEntries = await vscode.workspace.fs.readDirectory(directoryUri);
+	const directoryEntries = (await vscode.workspace.fs.readDirectory(directoryUri))
+		.filter(([name]) => name !== '.DS_Store');
 	const entries = await Promise.all(
 		directoryEntries.map(async ([name, fileType]): Promise<FileEntry> => {
 			const uri = vscode.Uri.joinPath(directoryUri, name);
@@ -178,10 +205,41 @@ async function calculateDirectorySize(directoryUri: vscode.Uri): Promise<number>
 	return size;
 }
 
-async function deleteEntry(webview: vscode.Webview, targetUri: vscode.Uri): Promise<void> {
-	const name = getDisplayName(targetUri);
+async function renameEntry(targetUri: vscode.Uri): Promise<boolean> {
+	const currentName = getDisplayName(targetUri);
+	const newName = await vscode.window.showInputBox({
+		title: 'Rename',
+		prompt: 'Enter a new name',
+		value: currentName,
+		valueSelection: [0, currentName.length],
+		validateInput: value => validateEntryName(value)
+	});
+	if (newName === undefined || newName === currentName) {
+		return false;
+	}
+
+	const parentUri = vscode.Uri.joinPath(targetUri, '..');
+	await vscode.workspace.fs.rename(targetUri, vscode.Uri.joinPath(parentUri, newName), { overwrite: false });
+	return true;
+}
+
+function validateEntryName(value: string): string | undefined {
+	if (!value.trim()) {
+		return 'The name cannot be empty.';
+	}
+	if (value === '.' || value === '..' || value.includes('/') || value.includes('\\')) {
+		return 'The name cannot contain path separators.';
+	}
+	return undefined;
+}
+
+async function deleteEntries(webview: vscode.Webview, targetUris: vscode.Uri[]): Promise<void> {
+	if (targetUris.length === 0) {
+		return;
+	}
+	const label = targetUris.length === 1 ? `"${getDisplayName(targetUris[0])}"` : `${targetUris.length} items`;
 	const choice = await vscode.window.showWarningMessage(
-		`Delete "${name}"?`,
+		`Delete ${label}?`,
 		{ modal: true, detail: 'This action moves the item to the Trash when supported by the file system.' },
 		'Delete'
 	);
@@ -189,23 +247,34 @@ async function deleteEntry(webview: vscode.Webview, targetUri: vscode.Uri): Prom
 		return;
 	}
 
-	await vscode.workspace.fs.delete(targetUri, { recursive: true, useTrash: true });
-	await webview.postMessage({ type: 'deleted', uri: targetUri.toString() });
+	for (const targetUri of targetUris) {
+		await vscode.workspace.fs.delete(targetUri, { recursive: true, useTrash: true });
+	}
+	await webview.postMessage({ type: 'deleted' });
 }
 
-async function pasteEntry(clipboardEntry: ClipboardEntry, destinationDirectoryUri: vscode.Uri): Promise<boolean> {
+async function pasteEntries(clipboardState: ClipboardState, destinationDirectoryUri: vscode.Uri): Promise<vscode.Uri[]> {
 	const destinationStat = await vscode.workspace.fs.stat(destinationDirectoryUri);
 	if (!(destinationStat.type & vscode.FileType.Directory)) {
 		throw new Error('Items can only be pasted into a folder.');
 	}
+	const completedUris: vscode.Uri[] = [];
+	for (const sourceUri of clipboardState.uris) {
+		if (await pasteEntry(sourceUri, clipboardState.operation, destinationDirectoryUri)) {
+			completedUris.push(sourceUri);
+		}
+	}
+	return completedUris;
+}
 
-	const targetUri = vscode.Uri.joinPath(destinationDirectoryUri, getDisplayName(clipboardEntry.uri));
-	if (targetUri.toString() === clipboardEntry.uri.toString()) {
+async function pasteEntry(sourceUri: vscode.Uri, operation: 'cut' | 'copy', destinationDirectoryUri: vscode.Uri): Promise<boolean> {
+	const targetUri = vscode.Uri.joinPath(destinationDirectoryUri, getDisplayName(sourceUri));
+	if (targetUri.toString() === sourceUri.toString()) {
 		await confirmOverwrite(targetUri);
 		return false;
 	}
 
-	const sourcePath = clipboardEntry.uri.path.endsWith('/') ? clipboardEntry.uri.path : `${clipboardEntry.uri.path}/`;
+	const sourcePath = sourceUri.path.endsWith('/') ? sourceUri.path : `${sourceUri.path}/`;
 	if (destinationDirectoryUri.path.startsWith(sourcePath)) {
 		throw new Error('A folder cannot be pasted into itself.');
 	}
@@ -223,10 +292,10 @@ async function pasteEntry(clipboardEntry: ClipboardEntry, destinationDirectoryUr
 		}
 	}
 
-	if (clipboardEntry.operation === 'cut') {
-		await vscode.workspace.fs.rename(clipboardEntry.uri, targetUri, { overwrite });
+	if (operation === 'cut') {
+		await vscode.workspace.fs.rename(sourceUri, targetUri, { overwrite });
 	} else {
-		await vscode.workspace.fs.copy(clipboardEntry.uri, targetUri, { overwrite });
+		await vscode.workspace.fs.copy(sourceUri, targetUri, { overwrite });
 	}
 	return true;
 }
@@ -292,14 +361,18 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootU
 		<div id="columnHeader" class="column-header">
 			<span>Name</span><span>Created</span><span>Modified</span><span>Size</span>
 		</div>
-		<div id="fileList" class="file-list list-view" role="listbox" aria-label="Folder contents"></div>
+		<div id="fileList" class="file-list list-view" role="listbox" aria-label="Folder contents" aria-multiselectable="true"></div>
 		<div id="emptyState" class="empty-state" hidden>This folder is empty.</div>
 	</main>
 	<div id="contextMenu" class="context-menu" role="menu" hidden>
 		<button id="cutButton" type="button" role="menuitem"><i class="codicon codicon-screen-cut"></i><span>Cut</span><span class="menu-shortcut" data-mac="⌘X" data-other="Ctrl+X"></span></button>
 		<button id="copyButton" type="button" role="menuitem"><i class="codicon codicon-copy"></i><span>Copy</span><span class="menu-shortcut" data-mac="⌘C" data-other="Ctrl+C"></span></button>
 		<button id="pasteButton" type="button" role="menuitem"><i class="codicon codicon-clippy"></i><span>Paste</span><span class="menu-shortcut" data-mac="⌘V" data-other="Ctrl+V"></span></button>
-			<div class="context-menu-separator" role="separator"></div>
+		<div class="context-menu-separator" role="separator"></div>
+		<button id="copyPathButton" type="button" role="menuitem"><i class="codicon codicon-copy"></i><span>Copy Path</span><span class="menu-shortcut" data-mac="⌥⌘C" data-other="Shift+Alt+C"></span></button>
+		<button id="renameButton" type="button" role="menuitem"><i class="codicon codicon-rename"></i><span>Rename</span><span class="menu-shortcut">F2</span></button>
+		<button id="openInTerminalButton" type="button" role="menuitem"><i class="codicon codicon-terminal"></i><span>Open in Terminal</span></button>
+		<div class="context-menu-separator" role="separator"></div>
 		<button id="deleteButton" type="button" role="menuitem"><i class="codicon codicon-trash"></i><span>Delete</span><span class="menu-shortcut" data-mac="⌘⌫" data-other="Delete"></span></button>
 	</div>
 	<div id="status" class="status" role="status" aria-live="polite">Loading...</div>

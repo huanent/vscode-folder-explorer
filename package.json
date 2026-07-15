@@ -2,7 +2,7 @@
   "name": "vscode-open-folder-in-editor",
   "displayName": "Open Folder in Editor",
   "description": "Open a folder from the Explorer in a dedicated editor-based file browser",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "huanent",
   "repository": {
     "url": "https://github.com/huanent/vscode-open-folder-in-editor.git",
