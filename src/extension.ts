@@ -14,7 +14,14 @@ type WebviewMessage =
 	| { type: 'readDirectory'; uri: string }
 	| { type: 'openFile'; uri: string }
 	| { type: 'calculateDirectorySize'; uri: string }
+	| { type: 'setClipboard'; uri: string; operation: 'cut' | 'copy' }
+	| { type: 'paste'; destinationUri: string }
 	| { type: 'delete'; uri: string };
+
+interface ClipboardEntry {
+	uri: vscode.Uri;
+	operation: 'cut' | 'copy';
+}
 
 export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
@@ -30,6 +37,7 @@ export function deactivate() { }
 
 function openFolderInEditor(context: vscode.ExtensionContext, rootUri: vscode.Uri): void {
 	const folderName = getDisplayName(rootUri);
+	let clipboardEntry: ClipboardEntry | undefined;
 	const panel = vscode.window.createWebviewPanel(
 		'openFolderInEditor.editor',
 		folderName,
@@ -74,6 +82,29 @@ function openFolderInEditor(context: vscode.ExtensionContext, rootUri: vscode.Ur
 						} catch (error) {
 							const errorMessage = error instanceof Error ? error.message : String(error);
 							await panel.webview.postMessage({ type: 'directorySizeError', uri: message.uri, message: errorMessage });
+						}
+						break;
+					}
+					case 'setClipboard': {
+						clipboardEntry = {
+							uri: getSafeUri(rootUri, message.uri),
+							operation: message.operation
+						};
+						await panel.webview.postMessage({ type: 'clipboardChanged', hasEntry: true });
+						break;
+					}
+					case 'paste': {
+						if (!clipboardEntry) {
+							throw new Error('There is no item to paste.');
+						}
+						const destinationUri = getSafeUri(rootUri, message.destinationUri);
+						const completed = await pasteEntry(clipboardEntry, destinationUri);
+						if (completed && clipboardEntry.operation === 'cut') {
+							clipboardEntry = undefined;
+							await panel.webview.postMessage({ type: 'clipboardChanged', hasEntry: false });
+						}
+						if (completed) {
+							await panel.webview.postMessage({ type: 'pasted' });
 						}
 						break;
 					}
@@ -162,6 +193,53 @@ async function deleteEntry(webview: vscode.Webview, targetUri: vscode.Uri): Prom
 	await webview.postMessage({ type: 'deleted', uri: targetUri.toString() });
 }
 
+async function pasteEntry(clipboardEntry: ClipboardEntry, destinationDirectoryUri: vscode.Uri): Promise<boolean> {
+	const destinationStat = await vscode.workspace.fs.stat(destinationDirectoryUri);
+	if (!(destinationStat.type & vscode.FileType.Directory)) {
+		throw new Error('Items can only be pasted into a folder.');
+	}
+
+	const targetUri = vscode.Uri.joinPath(destinationDirectoryUri, getDisplayName(clipboardEntry.uri));
+	if (targetUri.toString() === clipboardEntry.uri.toString()) {
+		await confirmOverwrite(targetUri);
+		return false;
+	}
+
+	const sourcePath = clipboardEntry.uri.path.endsWith('/') ? clipboardEntry.uri.path : `${clipboardEntry.uri.path}/`;
+	if (destinationDirectoryUri.path.startsWith(sourcePath)) {
+		throw new Error('A folder cannot be pasted into itself.');
+	}
+
+	let overwrite = false;
+	try {
+		await vscode.workspace.fs.stat(targetUri);
+		if (!(await confirmOverwrite(targetUri))) {
+			return false;
+		}
+		overwrite = true;
+	} catch (error) {
+		if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) {
+			throw error;
+		}
+	}
+
+	if (clipboardEntry.operation === 'cut') {
+		await vscode.workspace.fs.rename(clipboardEntry.uri, targetUri, { overwrite });
+	} else {
+		await vscode.workspace.fs.copy(clipboardEntry.uri, targetUri, { overwrite });
+	}
+	return true;
+}
+
+async function confirmOverwrite(targetUri: vscode.Uri): Promise<boolean> {
+	const choice = await vscode.window.showWarningMessage(
+		`Replace "${getDisplayName(targetUri)}"?`,
+		{ modal: true, detail: 'An item with the same name already exists in the destination folder.' },
+		'Replace'
+	);
+	return choice === 'Replace';
+}
+
 function getSafeUri(rootUri: vscode.Uri, value: string): vscode.Uri {
 	const candidate = vscode.Uri.parse(value);
 	const rootPath = rootUri.path.endsWith('/') ? rootUri.path : `${rootUri.path}/`;
@@ -210,7 +288,7 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootU
 			<button id="gridViewButton" class="icon-button" type="button" title="Grid view" aria-label="Grid view" aria-pressed="false"><i class="codicon codicon-layout"></i></button>
 		</div>
 	</header>
-	<main>
+	<main id="fileListRegion">
 		<div id="columnHeader" class="column-header">
 			<span>Name</span><span>Created</span><span>Modified</span><span>Size</span>
 		</div>
@@ -218,7 +296,11 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootU
 		<div id="emptyState" class="empty-state" hidden>This folder is empty.</div>
 	</main>
 	<div id="contextMenu" class="context-menu" role="menu" hidden>
-		<button id="deleteButton" type="button" role="menuitem"><i class="codicon codicon-trash"></i><span>Delete</span></button>
+		<button id="cutButton" type="button" role="menuitem"><i class="codicon codicon-screen-cut"></i><span>Cut</span><span class="menu-shortcut" data-mac="⌘X" data-other="Ctrl+X"></span></button>
+		<button id="copyButton" type="button" role="menuitem"><i class="codicon codicon-copy"></i><span>Copy</span><span class="menu-shortcut" data-mac="⌘C" data-other="Ctrl+C"></span></button>
+		<button id="pasteButton" type="button" role="menuitem"><i class="codicon codicon-clippy"></i><span>Paste</span><span class="menu-shortcut" data-mac="⌘V" data-other="Ctrl+V"></span></button>
+			<div class="context-menu-separator" role="separator"></div>
+		<button id="deleteButton" type="button" role="menuitem"><i class="codicon codicon-trash"></i><span>Delete</span><span class="menu-shortcut" data-mac="⌘⌫" data-other="Delete"></span></button>
 	</div>
 	<div id="status" class="status" role="status" aria-live="polite">Loading...</div>
 	<script nonce="${nonce}" src="${scriptUri}"></script>

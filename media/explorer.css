@@ -370,10 +370,44 @@ main {
 	cursor: pointer;
 }
 
+.context-menu button .codicon {
+	flex: 0 0 16px;
+}
+
+.menu-shortcut {
+	margin-left: auto;
+	padding-left: 18px;
+	color: var(--vscode-menu-foreground);
+	opacity: 0.7;
+	font-size: 12px;
+}
+
+.context-menu button:hover .menu-shortcut,
+.context-menu button:focus .menu-shortcut {
+	color: var(--vscode-menu-selectionForeground);
+}
+
 .context-menu button:hover,
 .context-menu button:focus {
 	color: var(--vscode-menu-selectionForeground);
 	background: var(--vscode-menu-selectionBackground);
+}
+
+.context-menu button:disabled {
+	opacity: 0.45;
+	cursor: default;
+}
+
+.context-menu button:disabled:hover,
+.context-menu button:disabled:focus {
+	color: var(--vscode-menu-foreground);
+	background: transparent;
+}
+
+.context-menu-separator {
+	height: 1px;
+	margin: 4px 7px;
+	background: var(--vscode-menu-separatorBackground, var(--vscode-panel-border));
 }
 
 [hidden] {

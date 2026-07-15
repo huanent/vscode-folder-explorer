@@ -7,9 +7,13 @@
 		listViewButton: document.getElementById('listViewButton'),
 		gridViewButton: document.getElementById('gridViewButton'),
 		columnHeader: document.getElementById('columnHeader'),
+		fileListRegion: document.getElementById('fileListRegion'),
 		fileList: document.getElementById('fileList'),
 		emptyState: document.getElementById('emptyState'),
 		contextMenu: document.getElementById('contextMenu'),
+		cutButton: document.getElementById('cutButton'),
+		copyButton: document.getElementById('copyButton'),
+		pasteButton: document.getElementById('pasteButton'),
 		deleteButton: document.getElementById('deleteButton'),
 		status: document.getElementById('status')
 	};
@@ -20,7 +24,8 @@
 		entries: [],
 		history: [],
 		view: previousState.view === 'grid' ? 'grid' : 'list',
-		contextEntry: null
+		contextEntry: null,
+		hasClipboardEntry: false
 	};
 
 	function requestDirectory(uri, addToHistory) {
@@ -143,6 +148,11 @@
 		item.focus({ preventScroll: true });
 	}
 
+	function getSelectedEntry() {
+		const selectedUri = elements.fileList.querySelector('.file-entry.selected')?.dataset.uri;
+		return state.entries.find(entry => entry.uri === selectedUri) || null;
+	}
+
 	function renderBreadcrumbs() {
 		const root = new URL(state.rootUri);
 		const current = new URL(state.currentUri);
@@ -181,14 +191,20 @@
 
 	function showContextMenu(event, entry, item) {
 		event.preventDefault();
-		selectEntry(item);
-		state.contextEntry = entry;
+		event.stopPropagation();
+		if (item) {
+			selectEntry(item);
+		}
+		state.contextEntry = entry || null;
+		elements.cutButton.disabled = !entry;
+		elements.copyButton.disabled = !entry;
+		elements.deleteButton.disabled = !entry;
+		elements.pasteButton.disabled = !state.hasClipboardEntry;
 		elements.contextMenu.hidden = false;
 		const width = elements.contextMenu.offsetWidth;
 		const height = elements.contextMenu.offsetHeight;
 		elements.contextMenu.style.left = `${Math.min(event.clientX, window.innerWidth - width - 8)}px`;
 		elements.contextMenu.style.top = `${Math.min(event.clientY, window.innerHeight - height - 8)}px`;
-		elements.deleteButton.focus();
 	}
 
 	function hideContextMenu() {
@@ -207,6 +223,30 @@
 		elements.gridViewButton.classList.toggle('selected', !isList);
 		elements.listViewButton.setAttribute('aria-pressed', String(isList));
 		elements.gridViewButton.setAttribute('aria-pressed', String(!isList));
+	}
+
+	function cutEntry(entry) {
+		if (entry) {
+			vscode.postMessage({ type: 'setClipboard', operation: 'cut', uri: entry.uri });
+		}
+	}
+
+	function copyEntry(entry) {
+		if (entry) {
+			vscode.postMessage({ type: 'setClipboard', operation: 'copy', uri: entry.uri });
+		}
+	}
+
+	function pasteEntry(destinationUri) {
+		if (state.hasClipboardEntry) {
+			vscode.postMessage({ type: 'paste', destinationUri });
+		}
+	}
+
+	function deleteEntry(entry) {
+		if (entry) {
+			vscode.postMessage({ type: 'delete', uri: entry.uri });
+		}
 	}
 
 	function getFileIcon(name) {
@@ -254,10 +294,24 @@
 	elements.refreshButton.addEventListener('click', () => requestDirectory(state.currentUri, false));
 	elements.listViewButton.addEventListener('click', () => setView('list'));
 	elements.gridViewButton.addEventListener('click', () => setView('grid'));
+	elements.fileListRegion.addEventListener('contextmenu', event => showContextMenu(event));
+	elements.cutButton.addEventListener('click', () => {
+		cutEntry(state.contextEntry);
+		hideContextMenu();
+	});
+	elements.copyButton.addEventListener('click', () => {
+		copyEntry(state.contextEntry);
+		hideContextMenu();
+	});
+	elements.pasteButton.addEventListener('click', () => {
+		const destinationUri = state.contextEntry?.type === 'directory'
+			? state.contextEntry.uri
+			: state.currentUri;
+		pasteEntry(destinationUri);
+		hideContextMenu();
+	});
 	elements.deleteButton.addEventListener('click', () => {
-		if (state.contextEntry) {
-			vscode.postMessage({ type: 'delete', uri: state.contextEntry.uri });
-		}
+		deleteEntry(state.contextEntry);
 		hideContextMenu();
 	});
 	document.addEventListener('click', event => {
@@ -268,6 +322,27 @@
 	document.addEventListener('keydown', event => {
 		if (event.key === 'Escape') {
 			hideContextMenu();
+			return;
+		}
+
+		const selectedEntry = getSelectedEntry();
+		if ((event.metaKey || event.ctrlKey) && !event.altKey) {
+			if (event.key.toLowerCase() === 'x' && selectedEntry) {
+				event.preventDefault();
+				cutEntry(selectedEntry);
+			} else if (event.key.toLowerCase() === 'c' && selectedEntry) {
+				event.preventDefault();
+				copyEntry(selectedEntry);
+			} else if (event.key.toLowerCase() === 'v' && state.hasClipboardEntry) {
+				event.preventDefault();
+				pasteEntry(state.currentUri);
+			} else if (event.metaKey && event.key === 'Backspace' && selectedEntry) {
+				event.preventDefault();
+				deleteEntry(selectedEntry);
+			}
+		} else if (event.key === 'Delete' && selectedEntry) {
+			event.preventDefault();
+			deleteEntry(selectedEntry);
 		}
 	});
 	window.addEventListener('blur', hideContextMenu);
@@ -278,8 +353,10 @@
 			state.currentUri = message.currentUri;
 			state.entries = message.entries;
 			render();
-		} else if (message.type === 'deleted') {
+		} else if (message.type === 'deleted' || message.type === 'pasted') {
 			requestDirectory(state.currentUri, false);
+		} else if (message.type === 'clipboardChanged') {
+			state.hasClipboardEntry = message.hasEntry;
 		} else if (message.type === 'directorySize') {
 			const entry = state.entries.find(item => item.uri === message.uri);
 			if (entry) {
@@ -301,6 +378,11 @@
 		}
 	});
 
+	document.querySelectorAll('.menu-shortcut').forEach(element => {
+		element.textContent = navigator.platform.toLowerCase().includes('mac')
+			? element.dataset.mac
+			: element.dataset.other;
+	});
 	updateViewButtons();
 	vscode.postMessage({ type: 'ready' });
 }());
