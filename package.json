@@ -2,7 +2,7 @@
   "name": "vscode-folder-explorer",
   "displayName": "Folder Explorer",
   "description": "Explore folders in the VS Code editor area",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "publisher": "huanent",
   "icon": "resources/logo.png",
   "repository": {
@@ -55,6 +55,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@vscode/codicons": "^0.0.45"
+    "@vscode/codicons": "^0.0.45",
+    "jszip": "^3.10.1"
   }
 }

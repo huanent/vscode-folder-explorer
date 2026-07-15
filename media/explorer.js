@@ -17,6 +17,9 @@
 		copyPathButton: document.getElementById('copyPathButton'),
 		renameButton: document.getElementById('renameButton'),
 		openInTerminalButton: document.getElementById('openInTerminalButton'),
+		compressButton: document.getElementById('compressButton'),
+		extractButton: document.getElementById('extractButton'),
+		archiveSeparator: document.getElementById('archiveSeparator'),
 		deleteButton: document.getElementById('deleteButton'),
 		status: document.getElementById('status')
 	};
@@ -29,7 +32,8 @@
 		view: previousState.view === 'grid' ? 'grid' : 'list',
 		contextEntry: null,
 		selectionAnchorUri: null,
-		hasClipboardEntry: false
+		hasClipboardEntry: false,
+		cutUris: new Set()
 	};
 
 	function requestDirectory(uri, addToHistory) {
@@ -45,6 +49,10 @@
 	function openEntry(entry) {
 		if (entry.type === 'directory') {
 			requestDirectory(entry.uri, true);
+			return;
+		}
+		if (entry.name.toLowerCase().endsWith('.zip')) {
+			extractEntry(entry);
 			return;
 		}
 		vscode.postMessage({ type: 'openFile', uri: entry.uri });
@@ -69,6 +77,7 @@
 		item.tabIndex = 0;
 		item.title = entry.name;
 		item.dataset.uri = entry.uri;
+		item.classList.toggle('cut', state.cutUris.has(entry.uri));
 
 		const name = document.createElement('div');
 		name.className = 'entry-name';
@@ -258,6 +267,12 @@
 			&& selectedEntries[0].type === 'directory'
 			&& selectedEntries[0].uri === entry?.uri
 		);
+		const canExtract = selectedEntries.length === 1
+			&& selectedEntries[0].type === 'file'
+			&& selectedEntries[0].name.toLowerCase().endsWith('.zip');
+		elements.compressButton.hidden = !hasSelection || canExtract;
+		elements.extractButton.hidden = !canExtract;
+		elements.archiveSeparator.hidden = !hasSelection;
 		elements.deleteButton.disabled = !hasSelection;
 		elements.pasteButton.disabled = !state.hasClipboardEntry;
 		elements.contextMenu.hidden = false;
@@ -318,6 +333,22 @@
 	function openInTerminal(entry) {
 		if (entry?.type === 'directory') {
 			vscode.postMessage({ type: 'openInTerminal', uri: entry.uri });
+		}
+	}
+
+	function compressEntries(entries) {
+		if (entries.length > 0) {
+			vscode.postMessage({
+				type: 'compress',
+				uris: entries.map(entry => entry.uri),
+				destinationUri: state.currentUri
+			});
+		}
+	}
+
+	function extractEntry(entry) {
+		if (entry?.type === 'file' && entry.name.toLowerCase().endsWith('.zip')) {
+			vscode.postMessage({ type: 'extract', uri: entry.uri });
 		}
 	}
 
@@ -405,6 +436,14 @@
 		openInTerminal(state.contextEntry);
 		hideContextMenu();
 	});
+	elements.compressButton.addEventListener('click', () => {
+		compressEntries(getSelectedEntries());
+		hideContextMenu();
+	});
+	elements.extractButton.addEventListener('click', () => {
+		extractEntry(getSelectedEntries()[0]);
+		hideContextMenu();
+	});
 	elements.deleteButton.addEventListener('click', () => {
 		deleteEntries(getSelectedEntries());
 		hideContextMenu();
@@ -460,10 +499,20 @@
 			state.entries = message.entries;
 			state.selectionAnchorUri = null;
 			render();
-		} else if (message.type === 'deleted' || message.type === 'pasted' || message.type === 'renamed') {
+		} else if (
+			message.type === 'deleted'
+			|| message.type === 'pasted'
+			|| message.type === 'renamed'
+			|| message.type === 'compressed'
+			|| message.type === 'extracted'
+		) {
 			requestDirectory(state.currentUri, false);
 		} else if (message.type === 'clipboardChanged') {
 			state.hasClipboardEntry = message.hasEntry;
+			state.cutUris = new Set(message.operation === 'cut' ? message.uris : []);
+			elements.fileList.querySelectorAll('.file-entry').forEach(item => {
+				item.classList.toggle('cut', state.cutUris.has(item.dataset.uri));
+			});
 		} else if (message.type === 'directorySize') {
 			const entry = state.entries.find(item => item.uri === message.uri);
 			if (entry) {

@@ -1,5 +1,6 @@
 import { homedir } from 'node:os';
 import * as vscode from 'vscode';
+import JSZip = require('jszip');
 
 interface FileEntry {
 	name: string;
@@ -20,6 +21,8 @@ type WebviewMessage =
 	| { type: 'rename'; uri: string }
 	| { type: 'copyPath'; uris: string[] }
 	| { type: 'openInTerminal'; uri: string }
+	| { type: 'compress'; uris: string[]; destinationUri: string }
+	| { type: 'extract'; uri: string }
 	| { type: 'delete'; uris: string[] };
 
 interface ClipboardState {
@@ -98,7 +101,7 @@ function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Ur
 							uris: message.uris.map(uri => getSafeUri(rootUri, uri)),
 							operation: message.operation
 						};
-						await panel.webview.postMessage({ type: 'clipboardChanged', hasEntry: clipboardState.uris.length > 0 });
+						await sendClipboardState(panel.webview, clipboardState);
 						break;
 					}
 					case 'paste': {
@@ -110,7 +113,7 @@ function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Ur
 						if (clipboardState.operation === 'cut' && completedUris.length > 0) {
 							const completed = new Set(completedUris.map(uri => uri.toString()));
 							clipboardState.uris = clipboardState.uris.filter(uri => !completed.has(uri.toString()));
-							await panel.webview.postMessage({ type: 'clipboardChanged', hasEntry: clipboardState.uris.length > 0 });
+							await sendClipboardState(panel.webview, clipboardState);
 						}
 						if (completedUris.length > 0) {
 							await panel.webview.postMessage({ type: 'pasted' });
@@ -139,6 +142,20 @@ function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Ur
 						terminal.show();
 						break;
 					}
+					case 'compress': {
+						const targetUris = message.uris.map(uri => getSafeUri(rootUri, uri));
+						const destinationUri = getSafeUri(rootUri, message.destinationUri);
+						await compressEntries(targetUris, destinationUri);
+						await panel.webview.postMessage({ type: 'compressed' });
+						break;
+					}
+					case 'extract': {
+						const archiveUri = getSafeUri(rootUri, message.uri);
+						if (await extractArchive(archiveUri)) {
+							await panel.webview.postMessage({ type: 'extracted' });
+						}
+						break;
+					}
 					case 'delete': {
 						const targetUris = message.uris.map(uri => getSafeUri(rootUri, uri));
 						if (targetUris.some(uri => uri.toString() === rootUri.toString())) {
@@ -156,6 +173,15 @@ function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Ur
 		undefined,
 		context.subscriptions
 	);
+}
+
+async function sendClipboardState(webview: vscode.Webview, clipboardState: ClipboardState): Promise<void> {
+	await webview.postMessage({
+		type: 'clipboardChanged',
+		hasEntry: clipboardState.uris.length > 0,
+		operation: clipboardState.operation,
+		uris: clipboardState.uris.map(uri => uri.toString())
+	});
 }
 
 async function sendDirectory(webview: vscode.Webview, rootUri: vscode.Uri, directoryUri: vscode.Uri): Promise<void> {
@@ -314,6 +340,135 @@ async function confirmOverwrite(targetUri: vscode.Uri): Promise<boolean> {
 	return choice === 'Replace';
 }
 
+async function compressEntries(sourceUris: vscode.Uri[], destinationDirectoryUri: vscode.Uri): Promise<void> {
+	if (sourceUris.length === 0) {
+		return;
+	}
+	const destinationStat = await vscode.workspace.fs.stat(destinationDirectoryUri);
+	if (!(destinationStat.type & vscode.FileType.Directory)) {
+		throw new Error('Archives can only be created in a folder.');
+	}
+
+	const zip = new JSZip();
+	const singleStat = sourceUris.length === 1 ? await vscode.workspace.fs.stat(sourceUris[0]) : undefined;
+	if (sourceUris.length === 1 && singleStat && singleStat.type & vscode.FileType.Directory) {
+		await addDirectoryToZip(zip, sourceUris[0], '');
+	} else {
+		for (const sourceUri of sourceUris) {
+			await addEntryToZip(zip, sourceUri, getDisplayName(sourceUri));
+		}
+	}
+
+	const defaultName = sourceUris.length === 1 ? `${getDisplayName(sourceUris[0])}.zip` : 'Archive.zip';
+	const archiveUri = await getAvailableChildUri(destinationDirectoryUri, defaultName);
+	const content = await zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+	await vscode.workspace.fs.writeFile(archiveUri, content);
+}
+
+async function addEntryToZip(zip: JSZip, sourceUri: vscode.Uri, zipPath: string): Promise<void> {
+	const stat = await vscode.workspace.fs.stat(sourceUri);
+	if (stat.type & vscode.FileType.SymbolicLink) {
+		return;
+	}
+	if (stat.type & vscode.FileType.Directory) {
+		zip.folder(zipPath);
+		await addDirectoryToZip(zip, sourceUri, zipPath);
+		return;
+	}
+	zip.file(zipPath, await vscode.workspace.fs.readFile(sourceUri), { date: new Date(stat.mtime) });
+}
+
+async function addDirectoryToZip(zip: JSZip, directoryUri: vscode.Uri, zipPath: string): Promise<void> {
+	const entries = await vscode.workspace.fs.readDirectory(directoryUri);
+	for (const [name] of entries) {
+		const entryPath = zipPath ? `${zipPath}/${name}` : name;
+		await addEntryToZip(zip, vscode.Uri.joinPath(directoryUri, name), entryPath);
+	}
+}
+
+async function extractArchive(archiveUri: vscode.Uri): Promise<boolean> {
+	if (!getDisplayName(archiveUri).toLowerCase().endsWith('.zip')) {
+		throw new Error('Only ZIP archives can be extracted.');
+	}
+	const archiveStat = await vscode.workspace.fs.stat(archiveUri);
+	if (!(archiveStat.type & vscode.FileType.File)) {
+		throw new Error('Only ZIP files can be extracted.');
+	}
+
+	const parentUri = vscode.Uri.joinPath(archiveUri, '..');
+	const folderName = getDisplayName(archiveUri).slice(0, -4);
+	const destinationUri = vscode.Uri.joinPath(parentUri, folderName);
+	try {
+		const destinationStat = await vscode.workspace.fs.stat(destinationUri);
+		if (!(destinationStat.type & vscode.FileType.Directory)) {
+			throw new Error(`Cannot extract because "${folderName}" already exists and is not a folder.`);
+		}
+		const choice = await vscode.window.showWarningMessage(
+			`The folder "${folderName}" already exists. Merge into it?`,
+			{ modal: true, detail: 'Existing files with the same names will be replaced.' },
+			'Merge'
+		);
+		if (choice !== 'Merge') {
+			return false;
+		}
+	} catch (error) {
+		if (!(error instanceof vscode.FileSystemError && error.code === 'FileNotFound')) {
+			throw error;
+		}
+		await vscode.workspace.fs.createDirectory(destinationUri);
+	}
+
+	const zip = await JSZip.loadAsync(await vscode.workspace.fs.readFile(archiveUri));
+	for (const [relativePath, entry] of Object.entries(zip.files)) {
+		const safeParts = getSafeArchivePathParts(relativePath);
+		if (safeParts.length === 0) {
+			continue;
+		}
+		const targetUri = vscode.Uri.joinPath(destinationUri, ...safeParts);
+		if (entry.dir) {
+			await vscode.workspace.fs.createDirectory(targetUri);
+		} else {
+			await vscode.workspace.fs.createDirectory(vscode.Uri.joinPath(targetUri, '..'));
+			await vscode.workspace.fs.writeFile(targetUri, await entry.async('uint8array'));
+		}
+	}
+	return true;
+}
+
+function getSafeArchivePathParts(relativePath: string): string[] {
+	const normalized = relativePath.replaceAll('\\', '/');
+	const parts = normalized.split('/').filter(Boolean);
+	if (normalized.startsWith('/') || parts.some(part => part === '.' || part === '..')) {
+		throw new Error(`The archive contains an unsafe path: ${relativePath}`);
+	}
+	return parts;
+}
+
+async function getAvailableChildUri(parentUri: vscode.Uri, requestedName: string): Promise<vscode.Uri> {
+	const extensionIndex = requestedName.toLowerCase().endsWith('.zip') ? requestedName.length - 4 : requestedName.length;
+	const baseName = requestedName.slice(0, extensionIndex);
+	const extension = requestedName.slice(extensionIndex);
+	let index = 1;
+	let candidate = vscode.Uri.joinPath(parentUri, requestedName);
+	while (await uriExists(candidate)) {
+		index += 1;
+		candidate = vscode.Uri.joinPath(parentUri, `${baseName} ${index}${extension}`);
+	}
+	return candidate;
+}
+
+async function uriExists(uri: vscode.Uri): Promise<boolean> {
+	try {
+		await vscode.workspace.fs.stat(uri);
+		return true;
+	} catch (error) {
+		if (error instanceof vscode.FileSystemError && error.code === 'FileNotFound') {
+			return false;
+		}
+		throw error;
+	}
+}
+
 function getSafeUri(rootUri: vscode.Uri, value: string): vscode.Uri {
 	const candidate = vscode.Uri.parse(value);
 	const rootPath = rootUri.path.endsWith('/') ? rootUri.path : `${rootUri.path}/`;
@@ -378,6 +533,9 @@ function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri, rootU
 		<button id="renameButton" type="button" role="menuitem"><i class="codicon codicon-rename"></i><span>Rename</span><span class="menu-shortcut">F2</span></button>
 		<button id="openInTerminalButton" type="button" role="menuitem"><i class="codicon codicon-terminal"></i><span>Open in Terminal</span></button>
 		<div class="context-menu-separator" role="separator"></div>
+		<button id="compressButton" type="button" role="menuitem"><i class="codicon codicon-file-zip"></i><span>Compress to ZIP</span></button>
+		<button id="extractButton" type="button" role="menuitem"><i class="codicon codicon-file-zip"></i><span>Extract ZIP</span></button>
+		<div id="archiveSeparator" class="context-menu-separator" role="separator"></div>
 		<button id="deleteButton" type="button" role="menuitem"><i class="codicon codicon-trash"></i><span>Delete</span><span class="menu-shortcut" data-mac="⌘⌫" data-other="Delete"></span></button>
 	</div>
 	<div id="status" class="status" role="status" aria-live="polite">Loading...</div>
