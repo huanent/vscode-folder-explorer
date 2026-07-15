@@ -2,8 +2,9 @@
   "name": "vscode-folder-explorer",
   "displayName": "Folder Explorer",
   "description": "Explore folders in the VS Code editor area",
-  "version": "0.2.0",
+  "version": "1.0.0",
   "publisher": "huanent",
+  "icon": "resources/logo.png",
   "repository": {
     "url": "https://github.com/huanent/vscode-folder-explorer.git",
     "type": "github"

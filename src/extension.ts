@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import * as vscode from 'vscode';
 
 interface FileEntry {
@@ -28,9 +29,16 @@ interface ClipboardState {
 
 export function activate(context: vscode.ExtensionContext) {
 	context.subscriptions.push(
-		vscode.commands.registerCommand('folderExplorer.open', (uri: vscode.Uri) => {
-			if (uri) {
-				openFolderExplorer(context, uri);
+		vscode.commands.registerCommand('folderExplorer.open', async (uri?: vscode.Uri) => {
+			const rootUri = uri ?? (await vscode.window.showOpenDialog({
+				defaultUri: vscode.Uri.file(homedir()),
+				canSelectFiles: false,
+				canSelectFolders: true,
+				canSelectMany: false,
+				openLabel: 'Open'
+			}))?.[0];
+			if (rootUri) {
+				openFolderExplorer(context, rootUri);
 			}
 		})
 	);
@@ -55,10 +63,7 @@ function openFolderExplorer(context: vscode.ExtensionContext, rootUri: vscode.Ur
 		}
 	);
 
-	panel.iconPath = {
-		light: vscode.Uri.joinPath(context.extensionUri, 'resources', 'folder-light.svg'),
-		dark: vscode.Uri.joinPath(context.extensionUri, 'resources', 'folder-dark.svg')
-	};
+	panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'logo.svg');
 	panel.webview.html = getWebviewHtml(panel.webview, context.extensionUri, rootUri, folderName);
 	panel.webview.onDidReceiveMessage(
 		async (message: WebviewMessage) => {
