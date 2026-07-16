@@ -2,7 +2,7 @@
   "name": "vscode-folder-explorer",
   "displayName": "Folder Explorer",
   "description": "Explore a folder in the editor area",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "publisher": "huanent",
   "icon": "resources/logo.png",
   "repository": {
@@ -16,6 +16,9 @@
   },
   "categories": [],
   "main": "./out/extension.js",
+  "extensionKind": [
+    "workspace"
+  ],
   "contributes": {
   "customEditors": [
     {
