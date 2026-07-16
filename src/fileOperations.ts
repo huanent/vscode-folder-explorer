@@ -48,22 +48,45 @@ export async function sendDirectory(webview: vscode.Webview, rootUri: vscode.Uri
 }
 
 export async function calculateDirectorySize(directoryUri: vscode.Uri): Promise<number> {
-	const entries = await vscode.workspace.fs.readDirectory(directoryUri);
-	let size = 0;
+	const limit = createConcurrencyLimit(16);
 
-	for (const [name, fileType] of entries) {
-		const uri = vscode.Uri.joinPath(directoryUri, name);
-		if (fileType & vscode.FileType.SymbolicLink) {
-			continue;
-		}
-		if (fileType & vscode.FileType.Directory) {
-			size += await calculateDirectorySize(uri);
-		} else {
-			size += (await vscode.workspace.fs.stat(uri)).size;
-		}
+	async function visitDirectory(uri: vscode.Uri): Promise<number> {
+		const entries = await limit(() => vscode.workspace.fs.readDirectory(uri));
+		const sizes = await Promise.all(entries.map(async ([name, fileType]) => {
+			if (fileType & vscode.FileType.SymbolicLink) {
+				return 0;
+			}
+
+			const entryUri = vscode.Uri.joinPath(uri, name);
+			if (fileType & vscode.FileType.Directory) {
+				return visitDirectory(entryUri);
+			}
+			return (await limit(() => vscode.workspace.fs.stat(entryUri))).size;
+		}));
+
+		return sizes.reduce((total, entrySize) => total + entrySize, 0);
 	}
 
-	return size;
+	return visitDirectory(directoryUri);
+}
+
+function createConcurrencyLimit(maxConcurrency: number) {
+	let activeCount = 0;
+	const pending: Array<() => void> = [];
+
+	return async function limit<T>(operation: () => PromiseLike<T>): Promise<T> {
+		if (activeCount >= maxConcurrency) {
+			await new Promise<void>(resolve => pending.push(resolve));
+		}
+		activeCount++;
+
+		try {
+			return await operation();
+		} finally {
+			activeCount--;
+			pending.shift()?.();
+		}
+	};
 }
 
 export async function renameEntry(targetUri: vscode.Uri): Promise<boolean> {
