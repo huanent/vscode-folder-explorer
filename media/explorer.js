@@ -21,6 +21,12 @@
 		extractButton: document.getElementById('extractButton'),
 		archiveSeparator: document.getElementById('archiveSeparator'),
 		deleteButton: document.getElementById('deleteButton'),
+		archiveProgress: document.getElementById('archiveProgress'),
+		archiveProgressLabel: document.getElementById('archiveProgressLabel'),
+		archiveProgressPercent: document.getElementById('archiveProgressPercent'),
+		archiveProgressBar: document.getElementById('archiveProgressBar'),
+		archiveProgressDetail: document.getElementById('archiveProgressDetail'),
+		cancelArchiveButton: document.getElementById('cancelArchiveButton'),
 		status: document.getElementById('status')
 	};
 	const previousState = vscode.getState() || {};
@@ -41,8 +47,33 @@
 		contextEntry: null,
 		selectionAnchorUri: null,
 		hasClipboardEntry: false,
-		cutUris: new Set()
+		cutUris: new Set(),
+		archiveOperation: null
 	};
+
+	function startArchiveOperation(kind, message) {
+		if (state.archiveOperation) {
+			return;
+		}
+		const operationId = crypto.randomUUID();
+		state.archiveOperation = { id: operationId, kind, cancelling: false };
+		elements.archiveProgressLabel.textContent = kind === 'compress' ? 'Compressing' : 'Extracting';
+		elements.archiveProgressPercent.textContent = '0%';
+		elements.archiveProgressBar.style.width = '0%';
+		elements.archiveProgressDetail.textContent = 'Starting...';
+		elements.cancelArchiveButton.disabled = false;
+		elements.cancelArchiveButton.textContent = 'Stop';
+		elements.archiveProgress.hidden = false;
+		vscode.postMessage({ ...message, type: kind, operationId });
+	}
+
+	function finishArchiveOperation(operationId) {
+		if (state.archiveOperation?.id !== operationId) {
+			return;
+		}
+		state.archiveOperation = null;
+		elements.archiveProgress.hidden = true;
+	}
 
 	function requestDirectory(uri, addToHistory) {
 		if (addToHistory && uri !== state.currentUri) {
@@ -362,8 +393,7 @@
 
 	function compressEntries(entries) {
 		if (entries.length > 0) {
-			vscode.postMessage({
-				type: 'compress',
+			startArchiveOperation('compress', {
 				uris: entries.map(entry => entry.uri),
 				destinationUri: state.currentUri
 			});
@@ -372,7 +402,7 @@
 
 	function extractEntry(entry) {
 		if (entry?.type === 'file' && entry.name.toLowerCase().endsWith('.zip')) {
-			vscode.postMessage({ type: 'extract', uri: entry.uri });
+			startArchiveOperation('extract', { uri: entry.uri });
 		}
 	}
 
@@ -468,6 +498,16 @@
 		extractEntry(getSelectedEntries()[0]);
 		hideContextMenu();
 	});
+	elements.cancelArchiveButton.addEventListener('click', () => {
+		if (!state.archiveOperation || state.archiveOperation.cancelling) {
+			return;
+		}
+		state.archiveOperation.cancelling = true;
+		elements.cancelArchiveButton.disabled = true;
+		elements.cancelArchiveButton.textContent = 'Stopping...';
+		elements.archiveProgressDetail.textContent = 'Stopping operation...';
+		vscode.postMessage({ type: 'cancelOperation', operationId: state.archiveOperation.id });
+	});
 	elements.deleteButton.addEventListener('click', () => {
 		deleteEntries(getSelectedEntries());
 		hideContextMenu();
@@ -523,14 +563,24 @@
 			state.entries = message.entries;
 			state.selectionAnchorUri = null;
 			render();
+		} else if (message.type === 'archiveProgress') {
+			if (state.archiveOperation?.id === message.operationId && !state.archiveOperation.cancelling) {
+				const percent = Math.max(0, Math.min(100, message.percent));
+				elements.archiveProgressPercent.textContent = `${Math.round(percent)}%`;
+				elements.archiveProgressBar.style.width = `${percent}%`;
+				elements.archiveProgressDetail.textContent = message.detail;
+			}
 		} else if (
 			message.type === 'deleted'
 			|| message.type === 'pasted'
 			|| message.type === 'renamed'
-			|| message.type === 'compressed'
-			|| message.type === 'extracted'
 		) {
 			requestDirectory(state.currentUri, false);
+		} else if (message.type === 'compressed' || message.type === 'extracted') {
+			finishArchiveOperation(message.operationId);
+			requestDirectory(state.currentUri, false);
+		} else if (message.type === 'archiveCancelled' || message.type === 'archiveDismissed') {
+			finishArchiveOperation(message.operationId);
 		} else if (message.type === 'clipboardChanged') {
 			state.hasClipboardEntry = message.hasEntry;
 			state.cutUris = new Set(message.operation === 'cut' ? message.uris : []);
@@ -553,6 +603,9 @@
 			elements.status.textContent = message.message;
 			elements.status.hidden = false;
 		} else if (message.type === 'error') {
+			if (message.operationId) {
+				finishArchiveOperation(message.operationId);
+			}
 			elements.status.textContent = message.message;
 			elements.status.hidden = false;
 		}
