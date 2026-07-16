@@ -406,9 +406,9 @@
 		}
 	}
 
-	function deleteEntries(entries) {
+	function deleteEntries(entries, permanent = false) {
 		if (entries.length > 0) {
-			vscode.postMessage({ type: 'delete', uris: entries.map(entry => entry.uri) });
+			vscode.postMessage({ type: 'delete', uris: entries.map(entry => entry.uri), permanent });
 		}
 	}
 
@@ -508,8 +508,8 @@
 		elements.archiveProgressDetail.textContent = 'Stopping operation...';
 		vscode.postMessage({ type: 'cancelOperation', operationId: state.archiveOperation.id });
 	});
-	elements.deleteButton.addEventListener('click', () => {
-		deleteEntries(getSelectedEntries());
+	elements.deleteButton.addEventListener('click', event => {
+		deleteEntries(getSelectedEntries(), event.shiftKey);
 		hideContextMenu();
 	});
 	document.addEventListener('click', event => {
@@ -541,7 +541,7 @@
 				pasteEntry(state.currentUri);
 			} else if (event.metaKey && event.key === 'Backspace' && selectedEntries.length > 0) {
 				event.preventDefault();
-				deleteEntries(selectedEntries);
+				deleteEntries(selectedEntries, event.shiftKey);
 			}
 		} else if (event.altKey && event.key.toLowerCase() === 'c' && (event.metaKey || event.shiftKey) && selectedEntries.length > 0) {
 			event.preventDefault();
@@ -551,7 +551,7 @@
 			renameEntry(selectedEntries[0]);
 		} else if (event.key === 'Delete' && selectedEntries.length > 0) {
 			event.preventDefault();
-			deleteEntries(selectedEntries);
+			deleteEntries(selectedEntries, event.shiftKey);
 		}
 	});
 	window.addEventListener('blur', hideContextMenu);

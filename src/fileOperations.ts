@@ -94,22 +94,24 @@ function validateEntryName(value: string): string | undefined {
 	return undefined;
 }
 
-export async function deleteEntries(webview: vscode.Webview, targetUris: vscode.Uri[]): Promise<void> {
+export async function deleteEntries(webview: vscode.Webview, targetUris: vscode.Uri[], permanent: boolean): Promise<void> {
 	if (targetUris.length === 0) {
 		return;
 	}
-	const label = targetUris.length === 1 ? `"${getDisplayName(targetUris[0])}"` : `${targetUris.length} items`;
-	const choice = await vscode.window.showWarningMessage(
-		`Delete ${label}?`,
-		{ modal: true, detail: 'This action moves the item to the Trash when supported by the file system.' },
-		'Delete'
-	);
-	if (choice !== 'Delete') {
-		return;
+	if (permanent) {
+		const label = targetUris.length === 1 ? `"${getDisplayName(targetUris[0])}"` : `${targetUris.length} items`;
+		const choice = await vscode.window.showWarningMessage(
+			`Permanently delete ${label}?`,
+			{ modal: true, detail: 'This action cannot be undone.' },
+			'Delete Permanently'
+		);
+		if (choice !== 'Delete Permanently') {
+			return;
+		}
 	}
 
 	for (const targetUri of targetUris) {
-		await vscode.workspace.fs.delete(targetUri, { recursive: true, useTrash: true });
+		await vscode.workspace.fs.delete(targetUri, { recursive: true, useTrash: !permanent });
 	}
 	await webview.postMessage({ type: 'deleted' });
 }

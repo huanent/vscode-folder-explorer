@@ -27,7 +27,7 @@ type WebviewMessage =
 	| { type: 'compress'; operationId: string; uris: string[]; destinationUri: string }
 	| { type: 'extract'; operationId: string; uri: string }
 	| { type: 'cancelOperation'; operationId: string }
-	| { type: 'delete'; uris: string[] };
+	| { type: 'delete'; uris: string[]; permanent: boolean };
 
 class ExplorerDocument implements vscode.CustomDocument {
 	latestViewState: ExplorerViewState;
@@ -254,7 +254,7 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 						if (targetUris.some(uri => uri.toString() === rootUri.toString())) {
 							throw new Error('The root folder cannot be deleted.');
 						}
-						await deleteEntries(panel.webview, targetUris);
+						await deleteEntries(panel.webview, targetUris, message.permanent);
 						break;
 					}
 				}

@@ -1,8 +1,8 @@
 {
   "name": "vscode-folder-explorer",
   "displayName": "Folder Explorer",
-  "description": "Explore folders in the VS Code editor area",
-  "version": "1.2.0",
+  "description": "Explore a folder in the editor area",
+  "version": "2.0.0",
   "publisher": "huanent",
   "icon": "resources/logo.png",
   "repository": {
