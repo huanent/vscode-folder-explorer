@@ -72,6 +72,7 @@ export function getWebviewHtml(
 		<div class="context-menu-separator" role="separator"></div>
 		<button id="copyPathButton" type="button" role="menuitem"><i class="codicon codicon-copy"></i><span>Copy Path</span><span class="menu-shortcut" data-mac="⌥⌘C" data-other="Shift+Alt+C"></span></button>
 		<button id="renameButton" type="button" role="menuitem"><i class="codicon codicon-rename"></i><span>Rename</span><span class="menu-shortcut">F2</span></button>
+		<button id="openInNewWindowButton" type="button" role="menuitem"><i class="codicon codicon-empty-window"></i><span>Open in New Window</span></button>
 		<button id="openInTerminalButton" type="button" role="menuitem"><i class="codicon codicon-terminal"></i><span>Open in Terminal</span></button>
 		<div class="context-menu-separator" role="separator"></div>
 		<button id="compressButton" type="button" role="menuitem"><i class="codicon codicon-file-zip"></i><span>Compress to ZIP</span></button>

@@ -16,6 +16,7 @@
 		pasteButton: document.getElementById('pasteButton'),
 		copyPathButton: document.getElementById('copyPathButton'),
 		renameButton: document.getElementById('renameButton'),
+		openInNewWindowButton: document.getElementById('openInNewWindowButton'),
 		openInTerminalButton: document.getElementById('openInTerminalButton'),
 		compressButton: document.getElementById('compressButton'),
 		extractButton: document.getElementById('extractButton'),
@@ -318,11 +319,13 @@
 		elements.copyButton.disabled = !hasSelection;
 		elements.copyPathButton.disabled = !hasSelection;
 		elements.renameButton.disabled = selectedEntries.length !== 1;
-		elements.openInTerminalButton.hidden = hasSelection && !(
+		const canOpenFolder = !hasSelection || (
 			selectedEntries.length === 1
 			&& selectedEntries[0].type === 'directory'
 			&& selectedEntries[0].uri === entry?.uri
 		);
+		elements.openInNewWindowButton.hidden = !canOpenFolder;
+		elements.openInTerminalButton.hidden = !canOpenFolder;
 		const canExtract = selectedEntries.length === 1
 			&& selectedEntries[0].type === 'file'
 			&& selectedEntries[0].name.toLowerCase().endsWith('.zip');
@@ -389,6 +392,11 @@
 	function openInTerminal(entry) {
 		const uri = entry?.type === 'directory' ? entry.uri : state.currentUri;
 		vscode.postMessage({ type: 'openInTerminal', uri });
+	}
+
+	function openInNewWindow(entry) {
+		const uri = entry?.type === 'directory' ? entry.uri : state.currentUri;
+		vscode.postMessage({ type: 'openInNewWindow', uri });
 	}
 
 	function compressEntries(entries) {
@@ -484,6 +492,10 @@
 	});
 	elements.renameButton.addEventListener('click', () => {
 		renameEntry(getSelectedEntries()[0]);
+		hideContextMenu();
+	});
+	elements.openInNewWindowButton.addEventListener('click', () => {
+		openInNewWindow(state.contextEntry);
 		hideContextMenu();
 	});
 	elements.openInTerminalButton.addEventListener('click', () => {

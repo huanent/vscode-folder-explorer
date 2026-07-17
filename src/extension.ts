@@ -23,6 +23,7 @@ type WebviewMessage =
 	| { type: 'paste'; destinationUri: string }
 	| { type: 'rename'; uri: string }
 	| { type: 'copyPath'; uris: string[] }
+	| { type: 'openInNewWindow'; uri: string }
 	| { type: 'openInTerminal'; uri: string }
 	| { type: 'compress'; operationId: string; uris: string[]; destinationUri: string }
 	| { type: 'extract'; operationId: string; uri: string }
@@ -205,6 +206,15 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 					case 'copyPath': {
 						const targetUris = message.uris.map(uri => getSafeUri(rootUri, uri));
 						await vscode.env.clipboard.writeText(targetUris.map(uri => uri.fsPath).join('\n'));
+						break;
+					}
+					case 'openInNewWindow': {
+						const directoryUri = getSafeUri(rootUri, message.uri);
+						const stat = await vscode.workspace.fs.stat(directoryUri);
+						if (!(stat.type & vscode.FileType.Directory)) {
+							throw new Error('Only folders can be opened in a new window.');
+						}
+						await vscode.commands.executeCommand('vscode.openFolder', directoryUri, true);
 						break;
 					}
 					case 'openInTerminal': {
