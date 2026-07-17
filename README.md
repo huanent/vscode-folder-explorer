@@ -1,8 +1,8 @@
-# Folder Explorer
+# Folder Viewer
 
 Explore and manage a folder in a full-size VS Code editor tab.
 
-Folder Explorer provides a familiar file manager without replacing the built-in Explorer. Open any folder in its own tab, browse with breadcrumbs, switch between list and grid layouts, and perform common file operations without leaving VS Code.
+Folder Viewer provides a familiar file manager without replacing the built-in Explorer. Open any folder in its own tab, browse with breadcrumbs, switch between list and grid layouts, and perform common file operations without leaving VS Code.
 
 ## Features
 
@@ -24,12 +24,12 @@ Folder Explorer provides a familiar file manager without replacing the built-in 
 ### From the Explorer
 
 1. Right-click a folder in the built-in VS Code Explorer.
-2. Select **Open in Folder Explorer**.
+2. Select **Open in Folder Viewer**.
 
 ### From the Command Palette
 
 1. Open the Command Palette with `Cmd+Shift+P` on macOS or `Ctrl+Shift+P` on Windows and Linux.
-2. Run **Open in Folder Explorer**.
+2. Run **Open in Folder Viewer**.
 3. Select the folder you want to browse.
 
 Double-click a folder to enter it or a file to open it. Right-click an item or the empty area for file operations and ZIP actions.

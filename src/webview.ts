@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 
-export interface ExplorerViewState {
+export interface ViewerViewState {
 	currentUri: string;
 	history: string[];
 	view: 'list' | 'grid';
@@ -11,7 +11,7 @@ export function getWebviewHtml(
 	extensionUri: vscode.Uri,
 	rootUri: vscode.Uri,
 	folderName: string,
-	initialViewState: ExplorerViewState
+	initialViewState: ViewerViewState
 ): string {
 	const nonce = getNonce();
 	const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'media', 'explorer.css'));

@@ -11,7 +11,7 @@ import {
 	renameEntry,
 	sendDirectory
 } from './fileOperations';
-import { ExplorerViewState, getWebviewHtml } from './webview';
+import { ViewerViewState, getWebviewHtml } from './webview';
 
 type WebviewMessage =
 	| { type: 'ready'; currentUri?: string }
@@ -30,8 +30,8 @@ type WebviewMessage =
 	| { type: 'cancelOperation'; operationId: string }
 	| { type: 'delete'; uris: string[]; permanent: boolean };
 
-class ExplorerDocument implements vscode.CustomDocument {
-	latestViewState: ExplorerViewState;
+class ViewerDocument implements vscode.CustomDocument {
+	latestViewState: ViewerViewState;
 
 	constructor(readonly uri: vscode.Uri, readonly rootUri: vscode.Uri) {
 		this.latestViewState = {
@@ -44,27 +44,27 @@ class ExplorerDocument implements vscode.CustomDocument {
 	dispose(): void { }
 }
 
-const explorerViewType = 'folderExplorer.editor';
+const viewerViewType = 'folderViewer.editor';
 
 let clipboardState: ClipboardState | undefined;
-const explorerPanels = new Set<vscode.WebviewPanel>();
+const viewerPanels = new Set<vscode.WebviewPanel>();
 
 export function activate(context: vscode.ExtensionContext) {
-	const editorProvider: vscode.CustomReadonlyEditorProvider<ExplorerDocument> = {
+	const editorProvider: vscode.CustomReadonlyEditorProvider<ViewerDocument> = {
 		openCustomDocument: uri => {
 			const rootValue = new URLSearchParams(uri.query).get('root');
 			if (!rootValue) {
-				throw new Error('The folder explorer resource does not contain a root folder.');
+				throw new Error('The folder viewer resource does not contain a root folder.');
 			}
-			return new ExplorerDocument(uri, vscode.Uri.parse(rootValue));
+			return new ViewerDocument(uri, vscode.Uri.parse(rootValue));
 		},
 		resolveCustomEditor: (document, panel) => {
-			configureExplorerPanel(context, panel, document);
+			configureViewerPanel(context, panel, document);
 		}
 	};
 
 	context.subscriptions.push(
-		vscode.commands.registerCommand('folderExplorer.open', async (uri?: vscode.Uri) => {
+		vscode.commands.registerCommand('folderViewer.open', async (uri?: vscode.Uri) => {
 			const rootUri = uri ?? (await vscode.window.showOpenDialog({
 				defaultUri: vscode.Uri.file(homedir()),
 				canSelectFiles: false,
@@ -73,10 +73,10 @@ export function activate(context: vscode.ExtensionContext) {
 				openLabel: 'Open'
 			}))?.[0];
 			if (rootUri) {
-				await openFolderExplorer(rootUri);
+				await openFolderViewer(rootUri);
 			}
 		}),
-		vscode.window.registerCustomEditorProvider(explorerViewType, editorProvider, {
+		vscode.window.registerCustomEditorProvider(viewerViewType, editorProvider, {
 			supportsMultipleEditorsPerDocument: true,
 			webviewOptions: { retainContextWhenHidden: true }
 		})
@@ -85,20 +85,20 @@ export function activate(context: vscode.ExtensionContext) {
 
 export function deactivate() { }
 
-async function openFolderExplorer(rootUri: vscode.Uri): Promise<void> {
+async function openFolderViewer(rootUri: vscode.Uri): Promise<void> {
 	const folderName = getDisplayName(rootUri);
 	const resourceUri = vscode.Uri.from({
-		scheme: 'folder-explorer',
-		path: `/${folderName}.folder-explorer`,
+		scheme: 'folder-viewer',
+		path: `/${folderName}.folder-viewer`,
 		query: new URLSearchParams({ root: rootUri.toString(), id: randomUUID() }).toString()
 	});
-	await vscode.commands.executeCommand('vscode.openWith', resourceUri, explorerViewType, {
+	await vscode.commands.executeCommand('vscode.openWith', resourceUri, viewerViewType, {
 		preview: false,
 		viewColumn: vscode.ViewColumn.Active
 	});
 }
 
-function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.WebviewPanel, document: ExplorerDocument): void {
+function configureViewerPanel(context: vscode.ExtensionContext, panel: vscode.WebviewPanel, document: ViewerDocument): void {
 	const rootUri = document.rootUri;
 	const folderName = getDisplayName(rootUri);
 	const archiveOperations = new Map<string, ArchiveOperation>();
@@ -115,9 +115,9 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 		]
 	};
 	panel.iconPath = vscode.Uri.joinPath(context.extensionUri, 'resources', 'logo.svg');
-	explorerPanels.add(panel);
+	viewerPanels.add(panel);
 	panel.onDidDispose(() => {
-		explorerPanels.delete(panel);
+		viewerPanels.delete(panel);
 		archiveOperations.forEach(operation => operation.cancelled = true);
 		cancelDirectorySizeOperations();
 	}, undefined, context.subscriptions);
@@ -308,7 +308,7 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 }
 
 async function broadcastClipboardState(state: ClipboardState): Promise<void> {
-	await Promise.all([...explorerPanels].map(panel => sendClipboardState(panel.webview, state)));
+	await Promise.all([...viewerPanels].map(panel => sendClipboardState(panel.webview, state)));
 }
 
 async function sendClipboardState(webview: vscode.Webview, clipboardState: ClipboardState): Promise<void> {

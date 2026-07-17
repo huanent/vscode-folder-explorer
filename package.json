@@ -1,16 +1,16 @@
 {
-  "name": "vscode-folder-explorer",
-  "displayName": "Folder Explorer",
-  "description": "Explore a folder in the editor area",
-  "version": "2.1.0",
+  "name": "folder-viewer",
+  "displayName": "Folder Viewer",
+  "description": "Explore a folder in the editor view",
+  "version": "2.1.2",
   "publisher": "huanent",
   "icon": "resources/logo.png",
   "repository": {
-    "url": "https://github.com/huanent/vscode-folder-explorer.git",
+    "url": "https://github.com/huanent/vscode-folder-viewer.git",
     "type": "github"
   },
   "license": "MIT",
-  "homepage": "https://github.com/huanent/vscode-folder-explorer",
+  "homepage": "https://github.com/huanent/vscode-folder-viewer",
   "engines": {
     "vscode": "^1.125.0"
   },
@@ -22,11 +22,11 @@
   "contributes": {
   "customEditors": [
     {
-    "viewType": "folderExplorer.editor",
-    "displayName": "Folder Explorer",
+    "viewType": "folderViewer.editor",
+    "displayName": "Folder Viewer",
     "selector": [
       {
-      "filenamePattern": "*.folder-explorer"
+      "filenamePattern": "*.folder-viewer"
       }
     ],
     "priority": "option"
@@ -34,13 +34,13 @@
   ],
     "commands": [
       {
-        "command": "folderExplorer.open",
-        "title": "Open in Folder Explorer"
+        "command": "folderViewer.open",
+        "title": "Open in Folder Viewer"
       }
     ],
     "keybindings": [
       {
-        "command": "folderExplorer.open",
+        "command": "folderViewer.open",
         "key": "ctrl+shift+;",
         "mac": "cmd+shift+;"
       }
@@ -48,7 +48,7 @@
     "menus": {
       "explorer/context": [
         {
-          "command": "folderExplorer.open",
+          "command": "folderViewer.open",
           "when": "explorerResourceIsFolder",
           "group": "navigation@999"
         }
