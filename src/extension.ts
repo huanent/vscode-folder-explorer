@@ -199,13 +199,13 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 							throw new Error('There is no item to paste.');
 						}
 						const destinationUri = getSafeUri(rootUri, message.destinationUri);
-						const completedUris = await pasteEntries(clipboardState, destinationUri);
+						const { completedUris, changed } = await pasteEntries(clipboardState, destinationUri);
 						if (clipboardState.operation === 'cut' && completedUris.length > 0) {
 							const completed = new Set(completedUris.map(uri => uri.toString()));
 							clipboardState.uris = clipboardState.uris.filter(uri => !completed.has(uri.toString()));
 							await broadcastClipboardState(clipboardState);
 						}
-						if (completedUris.length > 0) {
+						if (changed) {
 							await panel.webview.postMessage({ type: 'pasted' });
 						}
 						break;
