@@ -47,12 +47,15 @@ export async function sendDirectory(webview: vscode.Webview, rootUri: vscode.Uri
 	});
 }
 
-export async function calculateDirectorySize(directoryUri: vscode.Uri): Promise<number> {
+export async function calculateDirectorySize(directoryUri: vscode.Uri, token: vscode.CancellationToken): Promise<number> {
 	const limit = createConcurrencyLimit(16);
 
 	async function visitDirectory(uri: vscode.Uri): Promise<number> {
+		throwIfCancelled(token);
 		const entries = await limit(() => vscode.workspace.fs.readDirectory(uri));
+		throwIfCancelled(token);
 		const sizes = await Promise.all(entries.map(async ([name, fileType]) => {
+			throwIfCancelled(token);
 			if (fileType & vscode.FileType.SymbolicLink) {
 				return 0;
 			}
@@ -61,13 +64,21 @@ export async function calculateDirectorySize(directoryUri: vscode.Uri): Promise<
 			if (fileType & vscode.FileType.Directory) {
 				return visitDirectory(entryUri);
 			}
-			return (await limit(() => vscode.workspace.fs.stat(entryUri))).size;
+			const stat = await limit(() => vscode.workspace.fs.stat(entryUri));
+			throwIfCancelled(token);
+			return stat.size;
 		}));
 
 		return sizes.reduce((total, entrySize) => total + entrySize, 0);
 	}
 
 	return visitDirectory(directoryUri);
+}
+
+function throwIfCancelled(token: vscode.CancellationToken): void {
+	if (token.isCancellationRequested) {
+		throw new vscode.CancellationError();
+	}
 }
 
 function createConcurrencyLimit(maxConcurrency: number) {

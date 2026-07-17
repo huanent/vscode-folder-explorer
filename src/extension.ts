@@ -102,6 +102,10 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 	const rootUri = document.rootUri;
 	const folderName = getDisplayName(rootUri);
 	const archiveOperations = new Map<string, ArchiveOperation>();
+	const directorySizeOperations = new Set<vscode.CancellationTokenSource>();
+	const cancelDirectorySizeOperations = () => {
+		directorySizeOperations.forEach(operation => operation.cancel());
+	};
 	panel.title = folderName;
 	panel.webview.options = {
 		enableScripts: true,
@@ -115,6 +119,7 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 	panel.onDidDispose(() => {
 		explorerPanels.delete(panel);
 		archiveOperations.forEach(operation => operation.cancelled = true);
+		cancelDirectorySizeOperations();
 	}, undefined, context.subscriptions);
 	panel.webview.onDidReceiveMessage(
 		async (message: WebviewMessage) => {
@@ -152,6 +157,7 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 						break;
 					}
 					case 'readDirectory': {
+						cancelDirectorySizeOperations();
 						const directoryUri = getSafeUri(rootUri, message.uri);
 						await sendDirectory(panel.webview, rootUri, directoryUri);
 						break;
@@ -163,12 +169,20 @@ function configureExplorerPanel(context: vscode.ExtensionContext, panel: vscode.
 					}
 					case 'calculateDirectorySize': {
 						const directoryUri = getSafeUri(rootUri, message.uri);
+						const operation = new vscode.CancellationTokenSource();
+						directorySizeOperations.add(operation);
 						try {
-							const size = await calculateDirectorySize(directoryUri);
+							const size = await calculateDirectorySize(directoryUri, operation.token);
 							await panel.webview.postMessage({ type: 'directorySize', uri: message.uri, size });
 						} catch (error) {
+							if (operation.token.isCancellationRequested) {
+								break;
+							}
 							const errorMessage = error instanceof Error ? error.message : String(error);
 							await panel.webview.postMessage({ type: 'directorySizeError', uri: message.uri, message: errorMessage });
+						} finally {
+							directorySizeOperations.delete(operation);
+							operation.dispose();
 						}
 						break;
 					}

@@ -38,7 +38,7 @@ button {
 	align-items: center;
 	gap: 10px;
 	height: 46px;
-	padding: 7px 12px;
+	padding: 0px 12px 4px 12px;
 	border-bottom: 1px solid var(--vscode-panel-border);
 	background: var(--vscode-editor-background);
 }
